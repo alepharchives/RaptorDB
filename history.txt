@@ -1,0 +1,82 @@
+v1
+---
+
+v1.1
+----
+- Count() 
+- InMemoryIndex property and SaveIndex() -> log files kept until index saved to disk
+- storage file header size bug fix
+- safedictionary byte[] key fix 
+
+v1.2
+-----
+- EnumerateStorageFile() : keyvaluepair -> using yield
+- GetDuplicates(key)
+- FetchDuplicate(offset)  
+- FreeCacheOnCommit property
+
+v1.3
+-----
+- bug fix CheckHeader in StorageFile
+- bug fix Get in LogFile 
+
+v1.4
+----
+- reverse short, int, long bytes (big endian) so they sort properly in byte compare (in ascending order)
+- read operation on data file uses another stream 
+- bug fix duplicate page not set in keypointer
+
+v1.4.1
+------
+- bug fix helper.compare 
+
+v1.5
+-----
+- changed long to int for smaller index size and lower memeory usage should get 50% saving in both
+- all internal operations are on record numbers instead of file offsets
+- added a new file (mgrec extension) for mapping record numbers (int) to file offset (long) 
+- ** index files are not backward compatible with pre v1.5 ** 
+- bug in unsafe bitconvert routines, using ms versions until workaround found
+
+v1.5.1
+------
+- unsafe bitconvert fixed
+- speed optimized storage write to disk, removed slow file.seek and file.length (amazingly moving from long to int took a ~50% performance hit, now back to ~5% to the original code speed)
+
+v1.5.2
+------
+- bug fix int seek overflow in index
+- change to flush(true) for all files
+- bug fix hash duplicate code
+
+v1.6
+-----
+- IndexerThread will do indexing continuosly until the queue is empty
+- resolved a concurrrency issue with Get() and IndexerThread
+- replaced flush(true) with flush() for .net2 compatibility
+
+v1.7
+-----
+- implemented Shutdown() to close all files and shutdown the engine
+- duplicates are now encoded as WAH bitarrays (hybrid b+tree/bitmap and hash/bitmap indexes)
+- special case WAH bitmap for optimized memory usage
+- ** index files are not backward compatible with pre v1.7 because of duplicate encoding and compare changes **
+- now using IEnumerable<> instead of List<> for lower memory usage
+- code restructuring and cleanup
+- SaveIndex(true) will now flush all in-memory structures to disk indexes
+- added unit test project
+- optimized compare() routine ~18% faster, thanks to Dave Dolan
+- Read speed optimized 10x faster
+- Separate read/write streams for bitmap indexes
+
+v1.7.5
+------
+- added ThrottleInputWhenLogCount = 400 this kicks in after about 8 million items in the log queue
+- btree cache clearing now only clears leaf nodes to save memory and keep performance
+- optimized the indexer thread
+- bug fix shutdown
+- optimized Dave's compare()
+- added Twenty_Million_Set_Get_BTREE() test to unit tests
+- bug fix shutdown()
+- moved from SortedList to Dictionary for internal caches
+
