@@ -81,6 +81,11 @@ namespace RaptorDB
             _lastWriteOffset = _writefile.Seek(0L, SeekOrigin.End);
         }
 
+        public long Count()
+        {
+            return _recordfile.Length >> 3;
+        }
+
         public IEnumerable<KeyValuePair<byte[], byte[]>> Traverse()
         {
             long offset = 0;

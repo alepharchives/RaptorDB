@@ -80,3 +80,16 @@ v1.7.5
 - bug fix shutdown()
 - moved from SortedList to Dictionary for internal caches
 
+v1.8
+------
+- hash caching activated, read speed is on par with btree
+- zero length files are deleted on shutdown
+- bug fix hash shutdown 
+- new tests to test shutdown and flushing logic
+- Added RaptorDBString with unlimited key size
+- Count() now uses the storage file contents instead of the index (faster for huge row count >10million)
+- Changed internals to generics
+- Implemented IDisposable for clean shutdown
+- optimized bitmap index read speed
+- added minilogger for log progress files
+- 

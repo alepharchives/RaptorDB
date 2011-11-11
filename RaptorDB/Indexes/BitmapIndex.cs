@@ -35,22 +35,41 @@ namespace RaptorDB
         private int _lastRecordNumber = 0;
         private object _lock = new object();
         private SafeDictionary<int, WAHBitArray> _cache = new SafeDictionary<int, WAHBitArray>();
+        private SafeDictionary<int, long> _offsetCache = new SafeDictionary<int, long>();
+        ILog log = LogManager.GetLogger(typeof(BitmapIndex));
 
         #region [  P U B L I C  ]
         public void Shutdown()
         {
+            log.Debug("Shutdown BitmapIndex");
+            bool d1 = false;
+            bool d2 = false;
             Flush();
-
-            _recordFileRead.Close();
-            _recordFileWrite.Close();
-            _bitmapFileWrite.Close();
-            _bitmapFileRead.Close();
+            if (_recordFileRead != null)
+            {
+                if (_recordFileWrite.Length == 0) d1 = true;
+                if (_bitmapFileWrite.Length == 0) d2 = true;
+                _recordFileRead.Close();
+                _recordFileWrite.Close();
+                _bitmapFileWrite.Close();
+                _bitmapFileRead.Close();
+                if (d1)
+                    File.Delete(_Path + _FileName + _recExt);
+                if (d2)
+                    File.Delete(_Path + _FileName + _bmpExt);
+                _recordFileRead = null;
+                _recordFileWrite = null;
+                _bitmapFileRead = null;
+                _bitmapFileWrite = null;
+            }
         }
 
         public void Flush()
         {
-            _recordFileWrite.Flush();
-            _bitmapFileWrite.Flush();
+            if (_recordFileWrite != null)
+                _recordFileWrite.Flush();
+            if (_bitmapFileWrite != null)
+                _bitmapFileWrite.Flush();
         }
 
         public int GetFreeRecordNumber()
@@ -75,7 +94,6 @@ namespace RaptorDB
             Flush();
             if (freeMemory)
             {
-                //Console.WriteLine("clearing cache");
                 _cache = new SafeDictionary<int, WAHBitArray>();
             }
         }
@@ -101,45 +119,45 @@ namespace RaptorDB
 
         //public void OptimizeIndex()
         //{
-            // FIX : optimize index here
+        // FIX : optimize index here
 
-            //lock (_lock)
-            //{
-            //    _internalOP = true;
-            //    _lastBitmapOffset = 0;
-            //    _bitmapFile.Flush();
-            //    _bitmapFile.Close();
-            //    // compact bitmap index file to new file
-            //    _bitmapFile = new FileStream(_Path + _FileName + ".bitmap$", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
-            //    MemoryStream ms = new MemoryStream();
-            //    BinaryWriter bw = new BinaryWriter(ms, Encoding.UTF8);
-            //    // save words and bitmaps
-            //    using (FileStream words = new FileStream(_Path + _FileName + ".words", FileMode.Create))
-            //    {
-            //        foreach (KeyValuePair<string, Cache> kv in _index)
-            //        {
-            //            bw.Write(kv.Key);
-            //            uint[] ar = LoadBitmap(kv.Value.FileOffset);
-            //            long offset = SaveBitmap(ar, ar.Length, 0);
-            //            kv.Value.FileOffset = offset;
-            //            bw.Write(kv.Value.FileOffset);
-            //        }
-            //        // save words
-            //        byte[] b = ms.ToArray();
-            //        words.Write(b, 0, b.Length);
-            //        words.Flush();
-            //        words.Close();
-            //    }
-            //    // rename files
-            //    _bitmapFile.Flush();
-            //    _bitmapFile.Close();
-            //    File.Delete(_Path + _FileName + ".bitmap");
-            //    File.Move(_Path + _FileName + ".bitmap$", _Path + _FileName + ".bitmap");
-            //    // reload everything
-            //    _bitmapFile = new FileStream(_Path + _FileName + ".bitmap", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
-            //    _lastBitmapOffset = _bitmapFile.Seek(0L, SeekOrigin.End);
-            //    _internalOP = false;
-            //}
+        //lock (_lock)
+        //{
+        //    _internalOP = true;
+        //    _lastBitmapOffset = 0;
+        //    _bitmapFile.Flush();
+        //    _bitmapFile.Close();
+        //    // compact bitmap index file to new file
+        //    _bitmapFile = new FileStream(_Path + _FileName + ".bitmap$", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        //    MemoryStream ms = new MemoryStream();
+        //    BinaryWriter bw = new BinaryWriter(ms, Encoding.UTF8);
+        //    // save words and bitmaps
+        //    using (FileStream words = new FileStream(_Path + _FileName + ".words", FileMode.Create))
+        //    {
+        //        foreach (KeyValuePair<string, Cache> kv in _index)
+        //        {
+        //            bw.Write(kv.Key);
+        //            uint[] ar = LoadBitmap(kv.Value.FileOffset);
+        //            long offset = SaveBitmap(ar, ar.Length, 0);
+        //            kv.Value.FileOffset = offset;
+        //            bw.Write(kv.Value.FileOffset);
+        //        }
+        //        // save words
+        //        byte[] b = ms.ToArray();
+        //        words.Write(b, 0, b.Length);
+        //        words.Flush();
+        //        words.Close();
+        //    }
+        //    // rename files
+        //    _bitmapFile.Flush();
+        //    _bitmapFile.Close();
+        //    File.Delete(_Path + _FileName + ".bitmap");
+        //    File.Move(_Path + _FileName + ".bitmap$", _Path + _FileName + ".bitmap");
+        //    // reload everything
+        //    _bitmapFile = new FileStream(_Path + _FileName + ".bitmap", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        //    _lastBitmapOffset = _bitmapFile.Seek(0L, SeekOrigin.End);
+        //    _internalOP = false;
+        //}
         //}
 
         #endregion
@@ -157,11 +175,16 @@ namespace RaptorDB
             }
             else
             {
-                byte[] b = new byte[8];
-                long off = ((long)recno) * 8;
-                _recordFileRead.Seek(off, SeekOrigin.Begin);
-                _recordFileRead.Read(b, 0, 8);
-                long offset = Helper.ToInt64(b, 0);
+                long offset = 0;
+                if (_offsetCache.TryGetValue(recno, out offset) == false)
+                {
+                    byte[] b = new byte[8];
+                    long off = ((long)recno) * 8;
+                    _recordFileRead.Seek(off, SeekOrigin.Begin);
+                    _recordFileRead.Read(b, 0, 8);
+                    offset = Helper.ToInt64(b, 0);
+                    _offsetCache.Add(recno, offset);
+                }
                 ba = LoadBitmap(offset);
                 if (usecache)
                     _cache.Add(recno, ba);
@@ -173,12 +196,17 @@ namespace RaptorDB
         private void SaveBitmap(int recno, WAHBitArray bmp)
         {
             long offset = SaveBitmapToFile(bmp);
+            long v;
+            if (_offsetCache.TryGetValue(recno, out v))
+                _offsetCache[recno] = offset;
+            else
+                _offsetCache.Add(recno, offset);
+
             long pointer = ((long)recno) * 8;
             _recordFileWrite.Seek(pointer, SeekOrigin.Begin);
             byte[] b = new byte[8];
             b = Helper.GetBytes(offset, false);
             _recordFileWrite.Write(b, 0, 8);
-            //_recordFileWrite.Flush();
         }
 
         //-----------------------------------------------------------------
@@ -210,7 +238,6 @@ namespace RaptorDB
             }
             _bitmapFileWrite.Write(b, 0, b.Length);
             _lastBitmapOffset += b.Length;
-            //_bitmapFile.Flush();
             return off;
         }
 
@@ -233,10 +260,11 @@ namespace RaptorDB
                 {
                     type = (b[6] == 0 ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH);
                     int c = Helper.ToInt32(b, 2);
+                    byte[] buf = new byte[c * 4];
+                    bmp.Read(buf, 0, c * 4);
                     for (int i = 0; i < c; i++)
                     {
-                        bmp.Read(b, 0, 4);
-                        ar.Add((uint)Helper.ToInt32(b, 0));
+                        ar.Add((uint)Helper.ToInt32(buf, i * 4));
                     }
                 }
             }

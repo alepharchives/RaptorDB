@@ -16,12 +16,10 @@ namespace RaptorDB
 
         public static int MaxItemsBeforeIndexing = 20000;
 
-        public static bool FreeMemoryOnCommit = true;
+        public static bool FreeMemoryOnCommit = false;
 
         public static int BitmapOffsetSwitchOverCount = 10;
 
-        public static int ThrottleInputWhenLogCount = 400;
-
-        //public static int ThrottleWhenFreemMemoryLessThan = 800;
+        public static int FlushIndexerAfterThisManyMillion = 20;
     }
 }

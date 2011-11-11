@@ -19,46 +19,46 @@ namespace UnitTests
             // ~100 bytes
             "{\"$type\":\"BizFX.TestApp.Entity.Customer, BizFX.TestApp.Entity, Version=1.0.0.0, Culture=neutral, PublicKeyToken=426204062733118a\"";
 
-        [Test]
-        public void String_As_Key_btree()
-        {
-            string_as_key(INDEXTYPE.BTREE);
-        }
+        //[Test]
+        //public void String_As_Key_btree()
+        //{
+        //    string_as_key(INDEXTYPE.BTREE);
+        //}
 
 
-        [Test]
-        public void String_As_Key_hash()
-        {
-            string_as_key(INDEXTYPE.HASH);
-        }
+        //[Test]
+        //public void String_As_Key_hash()
+        //{
+        //    string_as_key(INDEXTYPE.HASH);
+        //}
 
-        private static void string_as_key(INDEXTYPE type)
-        {
-            int count = 40000;
-            Console.WriteLine("Count = " + count);
-            RaptorDB.RaptorDB rap = RaptorDB.RaptorDB.Open("docs\\strings" + type, 30, true, type);
-            rap.IndexingTimerSeconds = 1;
-            rap.InMemoryIndex = true;
-            string key = "some very long string";
+        //private static void string_as_key(INDEXTYPE type)
+        //{
+        //    int count = 40000;
+        //    Console.WriteLine("Count = " + count);
+        //    RaptorDB.RaptorDB rap = RaptorDB.RaptorDB.Open("docs\\strings" + type, 30, true, type);
+        //    rap.IndexingTimerSeconds = 1;
+        //    rap.InMemoryIndex = true;
+        //    string key = "some very long string";
 
-            for (int i = 0; i < count; i++)
-            {
-                string ss = key + i.ToString("000000");
-                rap.Set(key, ss);
-            }
-            //System.Threading.Thread.Sleep(5000);
-            rap.SaveIndex(true);
-            int j = 0;
-            for (int i = 0; i < count; i++)
-            {
-                string ss = key + i.ToString("000000");
-                byte[] bb = null;
-                if (rap.Get(key, out bb) == false)
-                    j++;// Console.WriteLine("error");
-            }
-            Console.WriteLine("Error count = " + j);
-            Assert.AreEqual(j, 0);
-        }
+        //    for (int i = 0; i < count; i++)
+        //    {
+        //        string ss = key + i.ToString("000000");
+        //        rap.Set(key, ss);
+        //    }
+        //    //System.Threading.Thread.Sleep(5000);
+        //    rap.SaveIndex(true);
+        //    int j = 0;
+        //    for (int i = 0; i < count; i++)
+        //    {
+        //        string ss = key + i.ToString("000000");
+        //        byte[] bb = null;
+        //        if (rap.Get(key, out bb) == false)
+        //            j++;// Console.WriteLine("error");
+        //    }
+        //    Console.WriteLine("Error count = " + j);
+        //    Assert.AreEqual(j, 0);
+        //}
 
         [Test]
         public void Duplicate_Guid_Key_btree()
@@ -76,18 +76,16 @@ namespace UnitTests
         private static void duplicate_guid_key(INDEXTYPE type, bool allowdups)
         {
             byte[] bb = System.Text.Encoding.UTF8.GetBytes(string1kb);
-            RaptorDB.RaptorDB rap = RaptorDB.RaptorDB.Open("docs\\duplicates" + type, 16, allowdups, type);
-            rap.IndexingTimerSeconds = 1;
-            rap.InMemoryIndex = true;
+            RaptorDB.RaptorDB<rdbByteArray> rap = RaptorDB.RaptorDB<rdbByteArray>.Open("docs\\duplicates" + type, 16, allowdups, type);
             Guid g = Guid.NewGuid();
             Console.WriteLine("saving...");
-            rap.Set(Guid.NewGuid(), bb);
+            rap.Set(new rdbByteArray(Guid.NewGuid().ToByteArray()), bb);
             for (int i = 0; i < 20000; i++)
             {
-                rap.Set(g, bb);
+                rap.Set(new rdbByteArray(g.ToByteArray()), bb);
             }
-            rap.SaveIndex(true);
-            foreach (var l in rap.GetDuplicates(g.ToByteArray()))
+            rap.SaveIndex();
+            foreach (var l in rap.GetDuplicates(new rdbByteArray(g.ToByteArray())))
             {
                 byte[] dup = rap.FetchDuplicate(l);
                 int i = dup.Length;
@@ -106,8 +104,8 @@ namespace UnitTests
         [Test]
         public static void Dave_Killer_Test()
         {
-            var db = RaptorDB.RaptorDB.Open("c:\\RaptorDbTest\\RawFileOne", 16, true, INDEXTYPE.BTREE);
-            db.InMemoryIndex = true;
+            var db = new RaptorDB.RaptorDBGuid("c:\\RaptorDbTest\\RawFileOne");//16, true, INDEXTYPE.BTREE);
+            //db.InMemoryIndex = true;
             //db.IndexingTimerSeconds = 1000;
             var guids = new List<Guid>();
             var sw = new System.Diagnostics.Stopwatch();
@@ -131,7 +129,7 @@ namespace UnitTests
             Console.Out.Write("Saving indexes...");
             sw.Reset();
             sw.Start();
-            db.SaveIndex(true);
+            db.SaveIndex();
             sw.Stop();
             Console.Out.WriteLine("\n\nSaving indices took {0} ms", sw.ElapsedMilliseconds);
             sw.Reset(); sw.Start();
@@ -172,7 +170,7 @@ namespace UnitTests
             /* Again I MUST wait for the indexing to finish or I'm toast */
             sw.Reset(); sw.Start();
 
-            db.SaveIndex(true);
+            db.SaveIndex();
             sw.Stop();
             Console.Out.WriteLine("\n\nSaving indices took {0} ms", sw.ElapsedMilliseconds);
 
@@ -184,7 +182,7 @@ namespace UnitTests
             {
                 //try
                 {
-                    var ints = db.GetDuplicates(guids[x].ToByteArray());
+                    var ints = db.GetDuplicates(guids[x]);
                     duplicateCount += ints.Count();
                 }
                 //catch (Exception ex)
@@ -198,37 +196,12 @@ namespace UnitTests
             Console.WriteLine("\nSpeed of enumerating duplicates: {0} items/second.", duplicateSpeed);
         }
 
-        [Test]
-        public static void SafeDictionary_Test()
-        {
-            int count = 500000;
-            Console.WriteLine("count = " + count);
-            SafeDictionary<byte[], int> d = new SafeDictionary<byte[], int>(20, new ByteArrayComparer());
-            List<Guid> guids = new List<Guid>();
-            for (int i = 0; i < count; i++)
-            {
-                guids.Add(Guid.NewGuid());
-            }
-            for (int i = 0; i < 10; i++)
-                d.Add(guids[i].ToByteArray(), i);
-
-            for (int i = 0; i < 10; i++)
-            {
-                int j = -1;
-                bool b = d.TryGetValue(guids[i].ToByteArray(), out j);
-                Assert.AreEqual(i, j);
-                if (i != j)
-                {
-                    Console.Write("x" + j);
-                }
-            }
-        }
 
         [Test]
         public static void Duplicates_Set_and_Fetch_btree()
         {
-            var db = RaptorDB.RaptorDB.Open("c:\\RaptorDbTest\\duptestfetch", 16, true, INDEXTYPE.BTREE);
-            db.InMemoryIndex = true;
+            var db = new RaptorDB.RaptorDBGuid("c:\\RaptorDbTest\\duptestfetch");//, 16, true, INDEXTYPE.BTREE);
+            //db.InMemoryIndex = true;
             //db.IndexingTimerSeconds = 1000;
             int guidcount = 1000;
             int dupcount = 100;
@@ -244,7 +217,7 @@ namespace UnitTests
                     db.Set(g, Encoding.UTF8.GetBytes(s));
                 }
             }
-            db.SaveIndex(true);
+            db.SaveIndex();
 
             foreach (Guid g in guids)
             {
@@ -271,9 +244,15 @@ namespace UnitTests
         }
 
         [Test]
+        public static void One_Million_Set_Get_BTREE_flush()
+        {
+            Set_Get("1millionflush", INDEXTYPE.BTREE, 1000000, true, true, false);
+        }
+
+        [Test]
         public static void One_Million_Set_Get_BTREE()
         {
-            One_Million_Set_Get(INDEXTYPE.BTREE, 1000000, true);
+            Set_Get("1million", INDEXTYPE.BTREE, 1000000, true, false, false);
         }
 
         [Test]
@@ -282,26 +261,335 @@ namespace UnitTests
             Console.WriteLine("Twenty million insert test");
             Console.WriteLine("This test will use a peak of 1.6Gb ram for guid keys");
             Console.WriteLine("This test will run for about 16 minutes depending on your hardware");
-            One_Million_Set_Get(INDEXTYPE.BTREE, 20 * 1000000, true);
+            Set_Get("20million", INDEXTYPE.BTREE, 20 * 1000000, true, true, false);
         }
+
+        [Test]
+        public static void Ten_Million_Set_Get_BTREE()
+        {
+            Console.WriteLine("Twenty million insert test");
+            Console.WriteLine("This test will use a peak of 1.2Gb ram for guid keys");
+            Console.WriteLine("This test will run for about 10 minutes depending on your hardware");
+            Set_Get("10million", INDEXTYPE.BTREE, 10 * 1000000, true, true, false);
+        }
+
+        //[Test]
+        //public static void OneHundred_Million_Set_Get_BTREE()
+        //{
+        //    Console.WriteLine("Two hundred million insert test");
+        //    Console.WriteLine("This test will use a peak of 8Gb ram for guid keys");
+        //    Console.WriteLine("This test will run for about 1.5 hour depending on your hardware");
+        //    Set_Get("100million", INDEXTYPE.BTREE, 100 * 1000000, true, true, true);
+        //}
 
         [Test]
         public static void One_Million_Set_Get_HASH()
         {
-            One_Million_Set_Get(INDEXTYPE.HASH, 1000000, true);
+            Set_Get("1million", INDEXTYPE.HASH, 1000000, true, false, false);
         }
 
-        private static void One_Million_Set_Get(INDEXTYPE type, int count, bool inmem)
+        [Test]
+        public static void One_Million_Set_Get_HASH_flush()
+        {
+            Set_Get("1millionflush", INDEXTYPE.HASH, 1000000, true, true, false);
+        }
+
+        private static void Set_Get(string fname, INDEXTYPE type, int count, bool inmem, bool flush, bool skiplist)
         {
             Console.WriteLine("One million test on " + type);
-            var db = RaptorDB.RaptorDB.Open("c:\\RaptorDbTest\\1million" + type, 16, false, type);
+            var db = RaptorDB.RaptorDB<rdbByteArray>.Open("c:\\RaptorDbTest\\" + fname + type, 16, false, type);
             db.InMemoryIndex = inmem;
             //db.IndexingTimerSeconds = 1000;
-            Console.Write("Building guid list...");
+
             var guids = new List<Guid>();
+            if (skiplist == false)
+            {
+                Console.Write("Building guid list...");
+                for (int i = 0; i < count; i++)
+                    guids.Add(Guid.NewGuid());
+            }
+            Console.WriteLine("done");
+            DateTime dt = DateTime.Now;
+            int c = 0;
+            if (skiplist == false)
+            {
+                foreach (Guid g in guids)
+                {
+                    string s = "" + g;
+                    db.Set(new rdbByteArray(g.ToByteArray()), Encoding.Unicode.GetBytes(s));
+                    c++;
+                    if (c % 10000 == 0)
+                        Console.Write(".");
+                    if (c % 100000 == 0)
+                        Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+                }
+            }
+            else
+            {
+                for (int k = 0; k < count; k++)
+                {
+                    Guid g = Guid.NewGuid();
+                    string s = "" + g;
+                    db.Set(new rdbByteArray(g.ToByteArray()), Encoding.Unicode.GetBytes(s));
+                    c++;
+                    if (c % 10000 == 0)
+                        Console.Write(".");
+                    if (c % 100000 == 0)
+                        Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+                }
+            }
+            Console.WriteLine("Flushing index...");
+            db.SaveIndex();
+            Console.WriteLine(count.ToString("#,#") + " save total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            dt = DateTime.Now;
+            if (skiplist == false)
+            {
+                //db.Shutdown();
+                db.Dispose();
+                db = null;
+                db = RaptorDB.RaptorDB<rdbByteArray>.Open("c:\\RaptorDbTest\\" + fname + type, 16, false, type);
+            }
+            GC.Collect(2);
+            int notfound = 0;
+            c = 0;
+            if (skiplist == false)
+            {
+                foreach (Guid g in guids)
+                {
+                    byte[] val;
+                    if (db.Get(new rdbByteArray(g.ToByteArray()), out val))
+                    {
+                        string s = Encoding.Unicode.GetString(val);
+                        if (s.Equals("" + g) == false)
+                            Assert.Fail("data does not match " + g);
+                    }
+                    else
+                    {
+                        notfound++;
+                        //Assert.Fail("item not found " + g);
+                    }
+                    c++;
+                    if (c % 100000 == 0)
+                        Console.Write(".");
+                }
+                if (notfound > 0)
+                {
+                    Console.WriteLine("items not found  = " + notfound);
+                    Assert.Fail("items not found");
+                }
+                Console.WriteLine("\r\nfetch total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            }
+            Console.WriteLine("ALL DONE OK");
+            //db.Shutdown();
+            db.Dispose();
+            db = null;
+        }
+
+        //[Test]
+        //public static void WAH_Bitarray_test()
+        //{
+        //    WAHBitArray ba = new WAHBitArray();
+
+        //    Random r = new Random();
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("Random bits set...");
+        //    for (int i = 0; i < 100000; i++)
+        //    {
+        //        if (r.Next(200) == 0)
+        //        {
+        //            ba.Set(i, true);
+        //        }
+        //    }
+        //    uint[] ui = ba.GetCompressed();
+        //    WAHBitArray b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    WAHBitArray result = b2.Xor(ba);
+        //    Assert.AreEqual(0, result.CountOnes());
+        //    Console.WriteLine(" done");
+
+
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("All 1 set...");
+        //    ba = new WAHBitArray();
+        //    for (int i = 0; i < 100000; i++)
+        //        ba.Set(i, true);
+        //    ui = ba.GetCompressed();
+        //    b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    result = b2.Xor(ba);
+        //    Assert.AreEqual(0, result.CountOnes());
+        //    Console.WriteLine(" done");
+
+
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("Alternate 1 set...");
+        //    ba = new WAHBitArray();
+        //    for (int i = 0; i < 100000; i++)
+        //    {
+        //        if (i % 2 == 0)
+        //            ba.Set(i, true);
+        //    }
+        //    ui = ba.GetCompressed();
+        //    b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    result = b2.Xor(ba);
+        //    Assert.AreEqual(0, result.CountOnes());
+        //    Console.WriteLine(" done");
+
+
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("Alternate 1 xor not self set...");
+        //    ba = new WAHBitArray();
+        //    for (int i = 0; i < 100000; i++)
+        //    {
+        //        if (i % 2 == 0)
+        //            ba.Set(i, true);
+        //    }
+        //    ui = ba.GetCompressed();
+        //    b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    result = b2.Xor(ba.Not());
+        //    Assert.AreEqual(100000, result.CountOnes());
+        //    Console.WriteLine(" done");
+
+
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("half 1 set...");
+        //    ba = new WAHBitArray();
+        //    for (int i = 50000; i < 100000; i++)
+        //    {
+        //        ba.Set(i, true);
+        //    }
+        //    ui = ba.GetCompressed();
+        //    b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    result = b2.Xor(ba);
+        //    Assert.AreEqual(0, result.CountOnes());
+        //    Console.WriteLine(" done");
+
+
+
+        //    // ----------------------------------------------------------
+        //    Console.Write("other half 1 set...");
+        //    ba = new WAHBitArray();
+        //    for (int i = 0; i < 50000; i++)
+        //    {
+        //        ba.Set(i, true);
+        //    }
+        //    ba.Set(100000, true);
+        //    ui = ba.GetCompressed();
+        //    b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //    result = b2.Xor(ba);
+        //    Assert.AreEqual(0, result.CountOnes());
+        //    Console.WriteLine(" done");
+        //}
+
+        //[Test]
+        //public static void WAH_Multiple_duplicates_test()
+        //{
+        //    for (int i = 0; i < 100; i++)
+        //    {
+        //        Console.WriteLine("i = " + i);
+        //        WAHBitArray ba = new WAHBitArray();
+        //        for (int j = 0; j < 1000; j++)
+        //        {
+        //            ba.Set(i * 1000 + j, true);
+        //        }
+        //        uint[] ui = ba.GetCompressed();
+        //        WAHBitArray b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+
+        //        WAHBitArray result = b2.Xor(ba);
+        //        Assert.AreEqual(0, result.CountOnes());
+        //        Console.WriteLine(" done");
+        //    }
+        //}
+
+
+        [Test]
+        public static void RaptodDBString_test()
+        {
+            Console.WriteLine("unlimited key size test");
+            var rap = new RaptorDBString(@"c:\raptordbtest\longstringkey", false);
+
+            for (int i = 0; i < 100000; i++)
+            {
+                rap.Set(string1kb + i, i.ToString());
+            }
+            Console.WriteLine("flushing index...");
+
+            rap.SaveIndex();
+
+            Console.WriteLine("fetching values...");
+
+            for (int i = 0; i < 100000; i++)
+            {
+                string str = "";
+                if (rap.Get(string1kb + i, out str))
+                {
+                    if (i.ToString() != str)
+                        Assert.Fail("value does not match");
+                }
+                else
+                    Assert.Fail("value not found");
+            }
+            rap.Shutdown();
+        }
+
+
+        //[Test]
+        //public static void Hash_Guid_conflict_test()
+        //{
+        //    Console.WriteLine("This test will fail if the hash function output conflicts on two different inputs.");
+        //    int count = 40 * 1000000;
+        //    Console.WriteLine("test count = " + count.ToString("#,#"));
+        //    Dictionary<Guid, uint> dic = new Dictionary<Guid, uint>(count);
+        //    RaptorDB.MurmurHash2Unsafe hc = new MurmurHash2Unsafe();
+        //    //Guid gg = Guid.NewGuid();
+        //    //dic.Add(gg, 1);
+        //    //dic.Add(gg, 2);
+        //    for (int i = 0; i < count; i++)
+        //    {
+        //        Guid g = Guid.NewGuid();
+        //        uint h = hc.Hash(g.TordbByteArrayay());
+
+        //        dic.Add(g, h);
+        //    }
+        //}
+        [Test]
+        public static void Twenty_Million_Optimized_GUID()
+        {
+            int count = 20 * 1000000;
+            Optimized_GUID(count);
+        }
+
+        [Test]
+        public static void Ten_Million_Optimized_GUID()
+        {
+            int count = 10 * 1000000;
+            Optimized_GUID(count);
+        }
+
+        private static void Optimized_GUID(int count)
+        {
+            Console.WriteLine("testing : " + count.ToString("#,#"));
+            var db = new RaptorDBGuid("c:\\RaptorDbTest\\" + count);
+
+            var guids = new List<Guid>();
+            Console.Write("Building guid list...");
             for (int i = 0; i < count; i++)
                 guids.Add(Guid.NewGuid());
             Console.WriteLine("done");
+            FileStream fs = new FileStream("c:\\RaptorDbTest\\guids", FileMode.Create);
+            for (int i = 0; i < count; i++)
+                fs.Write(guids[i].ToByteArray(), 0, 16);
+            fs.Flush();
+            fs.Close();
             DateTime dt = DateTime.Now;
             int c = 0;
             foreach (Guid g in guids)
@@ -315,9 +603,12 @@ namespace UnitTests
                     Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
             }
             Console.WriteLine("Flushing index...");
-            db.SaveIndex(true);
+            db.SaveIndex();
             Console.WriteLine(count.ToString("#,#") + " save total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
             dt = DateTime.Now;
+            GC.Collect(2);
+            int notfound = 0;
+            c = 0;
             foreach (Guid g in guids)
             {
                 byte[] val;
@@ -328,136 +619,113 @@ namespace UnitTests
                         Assert.Fail("data does not match " + g);
                 }
                 else
-                    Assert.Fail("item not found " + g);
+                {
+                    notfound++;
+                    //Assert.Fail("item not found " + g);
+                }
+                c++;
+                if (c % 100000 == 0)
+                    Console.Write(".");
             }
-            Console.WriteLine("fetch total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            Console.WriteLine("\r\nfetch total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            if (notfound > 0)
+            {
+                Console.WriteLine("items not found  = " + notfound);
+                Assert.Fail("items not found");
+            }
             Console.WriteLine("ALL DONE OK");
             db.Shutdown();
+            db = null;
         }
 
         [Test]
-        public static void WAH_Bitarray_test()
+        public static void Reread_10_mill()
         {
-            WAHBitArray ba = new WAHBitArray();
+            int count = 10 * 1000000;
+            Console.WriteLine("starting...");
+            var db = new RaptorDBGuid("c:\\RaptorDbTest\\" + count);
+            //db.SaveIndex(true);
+            var guids = new List<Guid>();
+            Console.Write("reading guid list...");
 
-            Random r = new Random();
-
-            // ----------------------------------------------------------
-            Console.Write("Random bits set...");
-            for (int i = 0; i < 100000; i++)
+            FileStream fs = new FileStream("c:\\RaptorDbTest\\guids", FileMode.Open);
+            byte[] by = new byte[16];
+            for (int i = 0; i < count; i++)
             {
-                if (r.Next(200) == 0)
+                fs.Read(by, 0, 16);
+                guids.Add(new Guid(by));
+            }
+            fs.Close();
+            Console.WriteLine("done");
+            DateTime dt = DateTime.Now;
+            int c = 0;
+
+            dt = DateTime.Now;
+            int notfound = 0;
+            c = 0;
+            foreach (Guid g in guids)
+            {
+                byte[] val;
+                if (db.Get(g, out val))
                 {
-                    ba.Set(i, true);
+                    string s = Encoding.Unicode.GetString(val);
+                    if (s.Equals("" + g) == false)
+                        Assert.Fail("data does not match " + g);
                 }
+                else
+                {
+                    notfound++;
+                    //Assert.Fail("item not found " + g);
+                }
+                c++;
+                if (c % 100000 == 0)
+                    Console.Write(".");
             }
-            uint[] ui = ba.GetCompressed();
-            WAHBitArray b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
-
-            WAHBitArray result = b2.Xor(ba);
-            Assert.AreEqual(0, result.CountOnes());
-            Console.WriteLine(" done");
-
-
-
-            // ----------------------------------------------------------
-            Console.Write("All 1 set...");
-            ba = new WAHBitArray();
-            for (int i = 0; i < 100000; i++)
-                ba.Set(i, true);
-            ui = ba.GetCompressed();
-            b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
-
-            result = b2.Xor(ba);
-            Assert.AreEqual(0, result.CountOnes());
-            Console.WriteLine(" done");
-
-
-
-            // ----------------------------------------------------------
-            Console.Write("Alternate 1 set...");
-            ba = new WAHBitArray();
-            for (int i = 0; i < 100000; i++)
+            Console.WriteLine("\r\nfetch total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            if (notfound > 0)
             {
-                if (i % 2 == 0)
-                    ba.Set(i, true);
+                Console.WriteLine("items not found  = " + notfound);
+                Assert.Fail("items not found");
             }
-            ui = ba.GetCompressed();
-            b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+            Console.WriteLine("ALL DONE OK");
+            db.Shutdown();
+            db = null;
 
-            result = b2.Xor(ba);
-            Assert.AreEqual(0, result.CountOnes());
-            Console.WriteLine(" done");
-
-
-
-            // ----------------------------------------------------------
-            Console.Write("Alternate 1 xor not self set...");
-            ba = new WAHBitArray();
-            for (int i = 0; i < 100000; i++)
-            {
-                if (i % 2 == 0)
-                    ba.Set(i, true);
-            }
-            ui = ba.GetCompressed();
-            b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
-
-            result = b2.Xor(ba.Not());
-            Assert.AreEqual(100000, result.CountOnes());
-            Console.WriteLine(" done");
-
-
-
-            // ----------------------------------------------------------
-            Console.Write("half 1 set...");
-            ba = new WAHBitArray();
-            for (int i = 50000; i < 100000; i++)
-            {
-                ba.Set(i, true);
-            }
-            ui = ba.GetCompressed();
-            b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
-
-            result = b2.Xor(ba);
-            Assert.AreEqual(0, result.CountOnes());
-            Console.WriteLine(" done");
-
-
-
-            // ----------------------------------------------------------
-            Console.Write("other half 1 set...");
-            ba = new WAHBitArray();
-            for (int i = 0; i < 50000; i++)
-            {
-                ba.Set(i, true);
-            }
-            ba.Set(100000, true);
-            ui = ba.GetCompressed();
-            b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
-
-            result = b2.Xor(ba);
-            Assert.AreEqual(0, result.CountOnes());
-            Console.WriteLine(" done");
         }
 
         [Test]
-        public static void WAH_Multiple_duplicates_test()
+        public static void comparetest()
         {
-            for (int i = 0; i < 100; i++)
+            DateTime dt = DateTime.Now;
+            for (int i = 0; i < 1000000; i++)
             {
-                Console.WriteLine("i = " + i);
-                WAHBitArray ba = new WAHBitArray();
-                for (int j = 0; j < 1000; j++)
-                {
-                    ba.Set(i * 1000 + j, true);
-                }
-                uint[] ui = ba.GetCompressed();
-                WAHBitArray b2 = new WAHBitArray(ba.UsingIndexes ? WAHBitArray.TYPE.Indexes : WAHBitArray.TYPE.Compressed_WAH, ui);
+                Guid g = Guid.NewGuid();
+                byte[] b = g.ToByteArray();
+                uint u = Helper.MurMur.Hash(b);
 
-                WAHBitArray result = b2.Xor(ba);
-                Assert.AreEqual(0, result.CountOnes());
-                Console.WriteLine(" done");
+                byte[] b2 = Helper.GetBytes((int)u, false);
+                byte[] b3 = new byte[4];
+                Buffer.BlockCopy(b2, 0, b3, 0, 4);
+
+                int j = Helper.CompareSafe(b2, b3);
             }
+
+            Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
+            dt = DateTime.Now;
+            for (int i = 0; i < 1000000; i++)
+            {
+                Guid g = Guid.NewGuid();
+                byte[] b = g.ToByteArray();
+                uint u = Helper.MurMur.Hash(b);
+
+                byte[] b2 = Helper.GetBytes((int)u, false);
+                byte[] b3 = new byte[4];
+                Buffer.BlockCopy(b2, 0, b3, 0, 4);
+
+                int j = Helper.CompareMemCmp(b2, b3);
+            }
+
+            Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
         }
     }
 }

@@ -13,22 +13,23 @@ namespace RaptorDB
         HASH = 1
     }
 
-    public class RaptorDB
+    public class RaptorDB<T> : IDisposable where T : IComparable<T>, IGetBytes<T>, IEquatable<T>, IEqualityComparer<T>
     {
-        private RaptorDB(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
+        public RaptorDB(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype, bool disablethread)
         {
-            Initialize(Filename, MaxKeysize, AllowDuplicateKeys, idxtype);
+            Initialize(Filename, MaxKeysize, AllowDuplicateKeys, idxtype, disablethread);
         }
 
-        private List<LogFile> _logs = new List<LogFile>();
+        private ILog log = LogManager.GetLogger(typeof(RaptorDB<T>));
+
+        private List<LogFile<T>> _logs = new List<LogFile<T>>();
         private string _Path = "";
         private string _FileName = "";
-        private LogFile _currentLOG;
+        private LogFile<T> _currentLOG;
         private byte _MaxKeySize;
         private StorageFile _archive;
-        private IIndex _index;
+        private IIndex<T> _index;
         private Thread _IndexerThread;
-        private Thread _ThrottleThread;
         private bool _shutdown = false;
         private string _logExtension = ".mglog";
         private string _datExtension = ".mgdat";
@@ -37,7 +38,7 @@ namespace RaptorDB
         private string _logString = "000000";
         private INDEXTYPE _idxType = INDEXTYPE.BTREE;
         private long _Count = -1;
-        private bool _InMemoryIndex = false;
+        private bool _InMemoryIndex = true;
         private bool _PauseIndex = false;
         private bool _isInternalOPRunning = false;
         private bool _throttleInput = false;
@@ -56,9 +57,9 @@ namespace RaptorDB
             set { _InMemoryIndex = value; _index.InMemory = value; }
         }
 
-        public static RaptorDB Open(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
+        public static RaptorDB<T> Open(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
         {
-            return new RaptorDB(Filename, MaxKeysize, AllowDuplicateKeys, idxtype);
+            return new RaptorDB<T>(Filename, MaxKeysize, AllowDuplicateKeys, idxtype, false);
         }
 
         //public void CompactFiles()
@@ -75,18 +76,19 @@ namespace RaptorDB
 
         public void SaveIndex()
         {
-            SaveIndex(false);
+            SaveIndex(true);
         }
 
-        public void SaveIndex(bool flushMemoryToDisk)
+        private void SaveIndex(bool flushMemoryToDisk)
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
-
+            PauseForInternalOP();
+            log.Debug("flushing : " + flushMemoryToDisk);
+            log.Debug("paused : " + _PauseIndex);
+            log.Debug("indexing : " + _indexing);
             _isInternalOPRunning = true;
-            // wait for indexing to stop
+            // wait for indexing thread to stop
             while (_indexing) Thread.Sleep(10);
-
+               
             if (flushMemoryToDisk)
             {
                 // flush current memory log
@@ -94,19 +96,25 @@ namespace RaptorDB
                 // flush everything to indexes
                 DoIndexing(true);
             }
+            log.Debug("saving to file");
+            internalSaveIndex();
+            _isInternalOPRunning = false;
+        }
+
+        private void internalSaveIndex()
+        {
             _index.SaveIndex();
+            log.Debug("index saved");
             // delete log files on disk
             List<string> pp = _deleteList;
             _deleteList = new List<string>();
             foreach (string s in pp)
                 File.Delete(s);
-            _isInternalOPRunning = false;
         }
 
-        public IEnumerable<int> GetDuplicates(byte[] key)
+        public IEnumerable<int> GetDuplicates(T key)
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
+            PauseForInternalOP();
 
             List<int> dups = new List<int>();
 
@@ -122,16 +130,14 @@ namespace RaptorDB
 
         public byte[] FetchDuplicate(int offset)
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
+            PauseForInternalOP();
 
             return _archive.ReadData(offset);
         }
 
         public IEnumerable<KeyValuePair<byte[], byte[]>> EnumerateStorageFile()
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
+            PauseForInternalOP();
 
             return _archive.Traverse();
         }
@@ -155,51 +161,25 @@ namespace RaptorDB
 
         public long Count()
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
-
             if (_Count == -1)
             {
-                long c = 0;
-                foreach (var i in _logs)
-                    c += i.CurrentCount;
-                c += _currentLOG.CurrentCount;
-                _Count = _index.Count() + c;
+                //long c = 0;
+                //foreach (var i in _logs)
+                //    c += i.CurrentCount;
+                //c += _currentLOG.CurrentCount;
+                _Count = _archive.Count();// +c;
             }
 
             return _Count;
         }
 
-        public bool Get(Guid guid, out byte[] val)
+        public bool Get(T key, out byte[] val)
         {
-            return Get(guid.ToByteArray(), out val);
-        }
-
-        public bool Get(string key, out byte[] val)
-        {
-            return Get(Helper.GetBytes(key), out val);
-        }
-
-        public bool Get(string key, out string val)
-        {
-            byte[] b;
-            val = null;
-            bool ok = Get(Helper.GetBytes(key), out b);
-            if (ok)
-            {
-                val = Helper.GetString(b);
-            }
-            return ok;
-        }
-
-        public bool Get(byte[] key, out byte[] val)
-        {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
+            PauseForInternalOP();
 
             int off;
             val = null;
-            byte[] k = key;
+            T k = key;
             _PauseIndex = true;
             // check in current log
             off = _currentLOG.Get(k);
@@ -211,7 +191,7 @@ namespace RaptorDB
                 return true;
             }
             // check in older log files
-            foreach (LogFile l in _logs)
+            foreach (LogFile<T> l in _logs)
             {
                 off = l.Get(k);
                 if (off > -1)
@@ -234,41 +214,21 @@ namespace RaptorDB
             return false;
         }
 
-        public bool Set(Guid guid, byte[] data)
-        {
-            return Set(guid.ToByteArray(), data);
-        }
-
-        public bool Set(string key, string val)
-        {
-            return Set(Helper.GetBytes(key), Helper.GetBytes(val));
-        }
-
-        public bool Set(string key, byte[] data)
-        {
-            return Set(Helper.GetBytes(key), data);
-        }
-
         private object _lock = new object();
-        public bool Set(byte[] key, byte[] data)
+        public bool Set(T key, byte[] data)
         {
-            if (_isInternalOPRunning)
-                while (_isInternalOPRunning) Thread.Sleep(10);
+            PauseForInternalOP();
 
             int recno = -1;
-            if (key.Length > _MaxKeySize)
-            {
-                throw new Exception("key greater than max key size of " + _MaxKeySize);
-            }
-            byte[] k = key;
-            if (_throttleInput)
-                Thread.Sleep(30);
+            //if (_throttleInput)
+            //    Thread.Sleep(1);
             lock (_lock)
             {
                 // save to storage
-                recno = _archive.WriteData(k, data);
+                byte[] kkey = key.GetBytes();
+                recno = _archive.WriteData(kkey, data);
                 // save to logfile
-                _currentLOG.Set(k, recno);
+                _currentLOG.Set(key, recno);
                 if (_currentLOG.CurrentCount > Global.MaxItemsBeforeIndexing)
                     NewLog();
 
@@ -279,31 +239,56 @@ namespace RaptorDB
 
         public void Shutdown()
         {
+            if (_index != null)
+            {
+                log.Debug("Shutting down");
+            }
+            Console.WriteLine("Shutting down...");
+            //_shutdown = true;
+
+            SaveIndex(true);
             _shutdown = true;
-            while (_indexing)
-                Thread.Sleep(50);
+            
             if (_index != null)
                 _index.Shutdown();
             if (_archive != null)
                 _archive.Shutdown();
             if (_currentLOG != null)
                 _currentLOG.Shutdown();
+            if (_logs != null)
+            {
+                foreach (var l in _logs)
+                {
+                    if (l != null)
+                        l.Close();
+                }
+            }
+            _logs = null;
             _index = null;
             _archive = null;
             _currentLOG = null;
+            log.Debug("Shutting down log");
+            _IndexerThread = null;
+            LogManager.Shutdown();
         }
 
         #region [            P R I V A T E     M E T H O D S              ]
+
+        private void PauseForInternalOP()
+        {
+            if (_isInternalOPRunning)
+                while (_isInternalOPRunning) Thread.Sleep(10);
+        }
 
         private void NewLog()
         {
             // new log file
             _logs.Add(_currentLOG);
-            LogFile newlog = new LogFile(_Path + "\\" + _FileName + _logExtension, _currentLOG.Number + 1, _MaxKeySize, _logString);
+            LogFile<T> newlog = new LogFile<T>(_Path + "\\" + _FileName + _logExtension, _currentLOG.Number + 1, _MaxKeySize, _logString);
             _currentLOG = newlog;
         }
 
-        private void Initialize(string filename, byte maxkeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
+        private void Initialize(string filename, byte maxkeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype, bool disablethread)
         {
             _idxType = idxtype;
             _MaxKeySize = maxkeysize;
@@ -315,12 +300,14 @@ namespace RaptorDB
             string db = _Path + "\\" + _FileName + _datExtension;
             string idx = _Path + "\\" + _FileName + _idxExtension;
 
+            LogManager.Configure(_Path + "\\" + _FileName + ".txt", 500, false);
+
             if (_idxType == INDEXTYPE.BTREE)
                 // setup database or load database
-                _index = new BTree(idx, _MaxKeySize, Global.DEFAULTNODESIZE, AllowDuplicateKeys, Global.BUCKETCOUNT);
+                _index = new BTree<T>(idx, _MaxKeySize, Global.DEFAULTNODESIZE, AllowDuplicateKeys, Global.BUCKETCOUNT);
             else
                 // hash index
-                _index = new Hash(idx, _MaxKeySize, Global.DEFAULTNODESIZE, AllowDuplicateKeys, Global.BUCKETCOUNT);
+                _index = new Hash<T>(idx, _MaxKeySize, Global.DEFAULTNODESIZE, AllowDuplicateKeys, Global.BUCKETCOUNT);
 
             _archive = new StorageFile(db, _MaxKeySize);
 
@@ -329,21 +316,23 @@ namespace RaptorDB
             // load old log files
             LoadLogFiles();
             Count();
+            log.Debug("Current Count = " + _Count.ToString("#,#"));
 
-            AppDomain.CurrentDomain.ProcessExit += new EventHandler(CurrentDomain_ProcessExit);
+            log.Debug("Starting indexer thread");
             // create indexing thread
-            _IndexerThread = new Thread(new ThreadStart(IndexThreadRunner));
-            _IndexerThread.IsBackground = true;
-            _IndexerThread.Start();
+            if (disablethread == false)
+                StartIndexerThread();
 
             //_ThrottleThread = new Thread(new ThreadStart(Throttle));
             //_ThrottleThread.IsBackground = true;
             //_ThrottleThread.Start();
         }
 
-        private void CurrentDomain_ProcessExit(object sender, EventArgs e)
+        internal void StartIndexerThread()
         {
-            Shutdown();
+            _IndexerThread = new Thread(new ThreadStart(IndexThreadRunner));
+            _IndexerThread.IsBackground = true;
+            _IndexerThread.Start();
         }
 
         //private int _throttlecount = 0;
@@ -369,113 +358,145 @@ namespace RaptorDB
             while (_shutdown == false)
             {
                 _timercounter++;
-                if (_timercounter > IndexingTimerSeconds)
+                if (_timercounter > IndexingTimerSeconds &&
+                    _isInternalOPRunning == false &&
+                    _shutdown == false)
                 {
-                    DoIndexing(false);
+                    try
+                    {
+                        DoIndexing(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error("" + ex);
+                    }
                     _timercounter = 0;
                 }
-
                 Thread.Sleep(1000);
             }
+            _indexing = false;
+            log.Debug("Indexer Thread done.");
+            _IndexerThread = null;
         }
 
         private bool _indexing = false;
         List<string> _deleteList = new List<string>();
+        private int _currCount = 0;
+        private int Million = 1000000;
+        private object _doindxlock = new object();
 
         private void DoIndexing(bool flushMode)
         {
-            while (_logs.Count > 0)
+            lock (_doindxlock)
             {
-                if (_shutdown)
+                _indexing = false;
+                while (_logs.Count > 0)
                 {
+                    log.Debug("DoIndexing");
                     _indexing = false;
-                    return;
-                }
-                if (flushMode == false)
-                    if (_isInternalOPRunning)
-                        while (_isInternalOPRunning && _shutdown == false) Thread.Sleep(10);
+                    if (_shutdown)
+                        return;
 
-                if (_logs.Count == 0)
-                    return;
-                _indexing = true;
-                LogFile l = _logs[0];
+                    log.Debug("log count = " + _logs.Count);
+                    if (_logs.Count == 0)
+                        return;
 
-                if (_logs.Count > Global.ThrottleInputWhenLogCount)
-                    _throttleInput = true;
-                else
-                    _throttleInput = false;
+                    LogFile<T> l = _logs[0];
 
-                if (l != null)
-                {
-                    // save duplicates
-                    if (l._duplicates != null)
+                    if (l != null)
                     {
-                        #region index memory duplicates
-                        foreach (KeyValuePair<byte[], List<int>> kv in l._duplicates)
+                        log.Debug("starting indexing on log # : " + l.Number);
+                        _indexing = true;
+                        // save duplicates
+                        if (l._duplicates != null)
                         {
-                            if (kv.Value != null)
+                            #region index memory duplicates
+                            foreach (KeyValuePair<T, List<int>> kv in l._duplicates)
                             {
-                                foreach (int off in kv.Value)
+                                if (kv.Value != null)
                                 {
-                                    _index.Set(kv.Key, off);
-                                    
-                                    if (flushMode == false)
+                                    foreach (int off in kv.Value)
                                     {
-                                        if (_shutdown)
+                                        _index.Set(kv.Key, off);
+
+                                        if (flushMode == false)
                                         {
-                                            _index.Commit();
-                                            _indexing = false;
-                                            return;
+                                            if (_shutdown)
+                                            {
+                                                log.Debug("shutting down in middle of duplicate processing");
+                                                _indexing = false;
+                                                //_index.Commit();
+                                                return;
+                                            }
+                                            while (_PauseIndex && _shutdown == false)
+                                            {
+                                                Thread.Sleep(10);
+                                            }
                                         }
-                                        while (_PauseIndex)
-                                            Thread.Sleep(10);
                                     }
                                 }
                             }
+                            #endregion
                         }
-                        #endregion
-                    }
-                    foreach (KeyValuePair<byte[], int> kv in l._memCache)
-                    {
-                        #region index data in cache
-                        _index.Set(kv.Key, kv.Value);
-                        
+                        foreach (KeyValuePair<T, int> kv in l._memCache)
+                        {
+                            #region index data in cache
+                            _index.Set(kv.Key, kv.Value);
+
+                            if (flushMode == false)
+                            {
+                                if (_shutdown)
+                                {
+                                    log.Debug("shutting down in middle of data processing");
+                                    _indexing = false;
+                                    //_index.Commit();
+                                    return;
+                                }
+                                while (_PauseIndex && _shutdown == false)
+                                {
+                                    Thread.Sleep(10);
+                                }
+                            }
+                            #endregion
+                        }
+                        log.Debug("commit index");
+                        _index.Commit();
+                        l.Close();
+                        _logs.Remove(l);
+                        _currCount++;
                         if (flushMode == false)
                         {
-                            if (_shutdown)
+                            // start flushing after this mil every 300k
+                            if (_currCount > 15 && _Count > ((long)Global.FlushIndexerAfterThisManyMillion) * Million)
                             {
-                                _index.Commit();
-                                _indexing = false;
-                                return;
+                                log.Debug("flushing index to disk");
+                                internalSaveIndex();
+                                _currCount = 0;
                             }
-                            while (_PauseIndex)
-                                Thread.Sleep(10);
                         }
-                        #endregion
+                        if (_index.InMemory == false)
+                            l.DeleteLog();
+                        else
+                            _deleteList.Add(l.FileName);
+                        l = null;
                     }
-                    _index.Commit();
-                    l.Close();
-                    _logs.Remove(l);
-                    if (_index.InMemory == false)
-                        l.DeleteLog();
-                    else
-                        _deleteList.Add(l.FileName);
-                    l = null;
-                }
-                //GC.Collect(2);
-                _indexing = false;
-                if (flushMode == false)
-                {
-                    if (_logs.Count == 1)
-                        return;
+                    //GC.Collect(2);
+                    _indexing = false;
+                    if (flushMode == false)
+                    {
+                        if (_logs.Count == 1)
+                            return;
+                    }
                 }
             }
         }
 
         private void LoadLogFiles()
         {
+            log.Debug("Loading log files");
             string[] fnames = Directory.GetFiles(_Path, _FileName + _logExtension + "*", SearchOption.TopDirectoryOnly);
             Array.Sort(fnames);
+            log.Debug("log count = " + fnames.Length);
             if (fnames.Length > 0)
             {
                 int i = 0;
@@ -496,7 +517,7 @@ namespace RaptorDB
                 if (File.Exists(fn))
                 {
                     // Parse extension number
-                    LogFile l = new LogFile();
+                    LogFile<T> l = new LogFile<T>();
                     l.FileName = fn;
                     l.Readonly = false;
                     l.Number = lognum++;
@@ -508,8 +529,13 @@ namespace RaptorDB
                     _logs.Add(l);
                 }
             }
-            _currentLOG = new LogFile(_Path + "\\" + _FileName + _logExtension, lognum, _MaxKeySize, _logString);
+            _currentLOG = new LogFile<T>(_Path + "\\" + _FileName + _logExtension, lognum, _MaxKeySize, _logString);
         }
         #endregion
+
+        public void Dispose()
+        {
+            Shutdown();
+        }
     }
 }

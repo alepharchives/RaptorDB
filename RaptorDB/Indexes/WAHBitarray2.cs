@@ -250,33 +250,22 @@ namespace RaptorDB
             else
             {
                 CheckBitArray();
-                int count = _uncompressed.Length << 5;
+                int count = _uncompressed.Length;//<< 5;
 
                 for (int i = 0; i < count; i++)
                 {
-                    bool b = internalGet(i);
-                    if (b == ones)
-                        yield return i;
+                    if (_uncompressed[i] > 0 && ones == true)
+                    {
+                        for (int j = 0; j < 32; j++)
+                        {
+                            bool b = internalGet(i << 5 + j);
+                            if (b == ones)
+                                yield return (i << 5) + j;
+                        }
+                    }
                 }
             }
         }
-
-        //public string DebugPrint()
-        //{
-        //    // FIX : use offsets
-        //    CheckBitArray();
-        //    StringBuilder sb = new StringBuilder();
-        //    int count = _uncompressed.Length << 5;
-
-        //    for (int i = 0; i < count; i++)
-        //    {
-        //        bool b = internalGet(i);
-        //        sb.Append(b ? "1" : "0");
-        //    }
-
-        //    return sb.ToString();
-        //}
-
 
         #region [  P R I V A T E  ]
 
@@ -490,7 +479,7 @@ namespace RaptorDB
             if (off > 0)
             {
                 list[pointer] |= val >> (off - 1);
-                if (pointer >= list.Count-1)
+                if (pointer >= list.Count - 1)
                     list.Add(0);
                 list[pointer + 1] |= val << (33 - off);
             }

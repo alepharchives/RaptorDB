@@ -5,15 +5,17 @@ using System.IO;
 
 namespace RaptorDB
 {
-    internal class BTree : IIndex
+    internal class BTree<T> : IIndex<T> where T : IComparable<T> , IGetBytes<T>
     {
-        private Node root = null;
-        private IndexFile _IndexFile = null;
-        private Dictionary<int, Node> CachedNodes = new Dictionary<int, Node>(Global.MaxItemsBeforeIndexing);
+        private Node<T> _root = null;
+        private IndexFile<T> _IndexFile = null;
+        private SafeDictionary<int, Node<T>> _CachedNodes = new SafeDictionary<int, Node<T>>(Global.MaxItemsBeforeIndexing);
+        private List<int> _LeafsToUnload = new List<int>();
         private short _Order = 4;
         private byte _MaxKeySize;
         private bool _allowDuplicates = false;
         private bool _InMemory = false;
+        ILog log = LogManager.GetLogger(typeof(BTree<T>));
 
         public BTree(string indexfilename, byte maxkeysize, short nodeSize, bool allowDuplicates, int bucketcount)
         {
@@ -24,11 +26,11 @@ namespace RaptorDB
                 nodeSize++;
             _Order = nodeSize;
 
-            _IndexFile = new IndexFile(indexfilename, _MaxKeySize, _Order, bucketcount, INDEXTYPE.BTREE);
-            Node n = _IndexFile.GetRoot();
+            _IndexFile = new IndexFile<T>(indexfilename, _MaxKeySize, _Order, bucketcount, INDEXTYPE.BTREE);
+            Node<T> n = _IndexFile.GetRoot();
             if (n.isRootPage)
-                root = n;
-            CachedNodes.Add(n.DiskPageNumber, n);
+                _root = n;
+            _CachedNodes.Add(n.DiskPageNumber, n);
             // get params from index file maxks, order
             _MaxKeySize = _IndexFile._maxKeySize;
             _Order = _IndexFile._PageNodeCount;
@@ -48,12 +50,12 @@ namespace RaptorDB
             }
         }
 
-        public bool Get(byte[] key, out int val)
+        public bool Get(T key, out int val)
         {
-            bytearr k = new bytearr(key);
+            T k = key;
 
             val = -1;
-            Node n = FindLeaf(root, k);
+            Node<T> n = FindLeaf(_root, k);
 
             bool found = false;
             int pos = FindNodeOrLowerPosition(n, k, ref found);
@@ -64,20 +66,20 @@ namespace RaptorDB
             return found;
         }
 
-        public void Set(byte[] key, int val)
+        public void Set(T key, int val)
         {
-            bytearr k = new bytearr(key);
+            T k = key;
 
-            if (root == null)
+            if (_root == null)
             {
-                root = new Node(this.GetNextPageNumber());
-                DirtyNode(root);
-                root.isRootPage = true;
-                root.DiskPageNumber = 0;
+                _root = new Node<T>(this.GetNextPageNumber());
+                DirtyNode(_root);
+                _root.isRootPage = true;
+                _root.DiskPageNumber = 0;
             }
 
-            Node nroot = null;
-            Node node = FindLeaf(root, k);
+            Node<T> nroot = null;
+            Node<T> node = FindLeaf(_root, k);
 
             bool found = false;
             int lastlower = FindNodeOrLowerPosition(node, k, ref found);
@@ -97,8 +99,8 @@ namespace RaptorDB
             {
                 if (lastlower == -1)
                 {
-                    bytearr oldkey = node.ChildPointers[0].Key;
-                    node.ChildPointers.Insert(0, new KeyPointer(k, val));
+                    T oldkey = node.ChildPointers[0].Key;
+                    node.ChildPointers.Insert(0, new KeyPointer<T>(k, val));
                     ReplaceParentKey(node, oldkey, k);
                 }
                 else
@@ -106,9 +108,9 @@ namespace RaptorDB
                     lastlower++;
                     // add to list
                     if (lastlower < node.ChildPointers.Count)
-                        node.ChildPointers.Insert(lastlower, new KeyPointer(k, val));
+                        node.ChildPointers.Insert(lastlower, new KeyPointer<T>(k, val));
                     else
-                        node.ChildPointers.Add(new KeyPointer(k, val));
+                        node.ChildPointers.Add(new KeyPointer<T>(k, val));
                 }
                 DirtyNode(node);
                 nroot = SplitNode(node);
@@ -116,41 +118,44 @@ namespace RaptorDB
 
             // new root node
             if (nroot != null)
-                root = nroot;
+                _root = nroot;
         }
 
         public void Commit()
         {
-            if (CachedNodes.ContainsKey(root.DiskPageNumber) == false)
-                CachedNodes.Add(root.DiskPageNumber, root);
+            Node<T> n = null;
+            if (_CachedNodes.TryGetValue(_root.DiskPageNumber, out n) == false)
+                _CachedNodes.Add(_root.DiskPageNumber, _root);
             if (_InMemory == false)
                 SaveIndex();
         }
 
         public void Shutdown()
         {
+            log.Debug("Shutdown BTree");
             Commit();
+
             _IndexFile.Shutdown();
 
-            root = null;
+            _root = null;
         }
 
-        public IEnumerable<int> Enumerate(byte[] fromkey, int start, int count)
+        public IEnumerable<int> Enumerate(T fromkey, int start, int count)
         {
             throw new NotImplementedException();
         }
 
         public long Count()
         {
-            return _IndexFile.CountNodes(root);
+            return _IndexFile.CountNodes(_root);
         }
 
-        public IEnumerable<int> GetDuplicates(byte[] key)
+        public IEnumerable<int> GetDuplicates(T key)
         {
             if (_allowDuplicates)
             {
-                bytearr k = new bytearr(key);
-                Node node = FindLeaf(root, k);
+                T k = key;
+                Node<T> node = FindLeaf(_root, k);
 
                 if (node != null)
                 {
@@ -172,27 +177,26 @@ namespace RaptorDB
 
         public void SaveIndex()
         {
-            if (_IndexFile.Commit(CachedNodes))
+            if (_IndexFile.Commit(_CachedNodes.GetList()))
             {
-                Dictionary<int, Node> ar = new Dictionary<int, Node>(Global.MaxItemsBeforeIndexing);
-                
-                foreach (var kv in CachedNodes)
+                if (Global.FreeMemoryOnCommit)
                 {
-                    if (kv.Value.isLeafPage == false)
-                        ar.Add(kv.Key, kv.Value);
+                    foreach (int i in _LeafsToUnload)
+                        _CachedNodes.Remove(i);
+
+                    _LeafsToUnload = new List<int>();
+
+                    Node<T> r = null;
+                    if (_CachedNodes.TryGetValue(_root.DiskPageNumber, out r) == false)
+                        _CachedNodes.Add(_root.DiskPageNumber, _root);
                 }
-                //CachedNodes = new Dictionary<int, Node>(Global.MaxItemsBeforeIndexing);
-                CachedNodes = ar;
-                Node r = null;
-                if (CachedNodes.TryGetValue(root.DiskPageNumber, out r) == false)
-                    CachedNodes.Add(root.DiskPageNumber, root);
             }
         }
         #endregion
 
         #region [   P R I V A T E   M E T H O D S   ]
 
-        private void SaveDuplicate(KeyPointer key, int oldvalue)
+        private void SaveDuplicate(KeyPointer<T> key, int oldvalue)
         {
             if (key.DuplicatesRecNo == -1)
                 key.DuplicatesRecNo = _IndexFile.GetBitmapDuplaicateFreeRecordNumber();
@@ -205,50 +209,55 @@ namespace RaptorDB
             return _IndexFile.GetNewPageNumber();
         }
 
-        private Node LoadNode(int number)
+        private Node<T> LoadNode(int number)
         {
             return LoadNode(number, false);
         }
 
-        private Node LoadNode(int number, bool skipcache)
+        private Node<T> LoadNode(int number, bool skipcache)
         {
             if (number == -1)
-                return root;
-            Node n;
-            if (CachedNodes.TryGetValue(number, out n))
+                return _root;
+            Node<T> n;
+            if (_CachedNodes.TryGetValue(number, out n))
                 return n;
             n = _IndexFile.LoadNodeFromPageNumber(number);
             if (skipcache == false)
-                CachedNodes.Add(number, n);
+            {
+                _CachedNodes.Add(number, n);
+                if (n.isLeafPage)
+                    _LeafsToUnload.Add(number);
+            }
             return n;
         }
 
-        private void DirtyNode(Node n)
+        private void DirtyNode(Node<T> n)
         {
             if (n.isDirty)
                 return;
 
             n.isDirty = true;
-            if (CachedNodes.ContainsKey(n.DiskPageNumber) == false)
-                CachedNodes.Add(n.DiskPageNumber, n);
+            Node<T> m = null;
+            if (_CachedNodes.TryGetValue(n.DiskPageNumber, out m) == false)
+                _CachedNodes.Add(n.DiskPageNumber, n);
         }
 
-        private Node SplitNode(Node node)
+        private Node<T> SplitNode(Node<T> node)
         {
             if (node.ChildPointers.Count <= _Order)
                 return null;
 
-            Node right = new Node(this.GetNextPageNumber());
+            Node<T> right = new Node<T>(this.GetNextPageNumber());
             DirtyNode(right);
             right.isLeafPage = node.isLeafPage;
             right.ParentPageNumber = node.ParentPageNumber;
             int mid = node.ChildPointers.Count / 2;
-            KeyPointer[] arrR = new KeyPointer[mid + 1];
-            KeyPointer[] arrN = new KeyPointer[mid];
+            KeyPointer<T>[] arrR = new KeyPointer<T>[mid + 1];
+            KeyPointer<T>[] arrN = new KeyPointer<T>[mid];
             node.ChildPointers.CopyTo(mid, arrR, 0, mid + 1);
             node.ChildPointers.CopyTo(0, arrN, 0, mid);
-            right.ChildPointers = new List<KeyPointer>(arrR);
-            node.ChildPointers = new List<KeyPointer>(arrN);
+            right.ChildPointers = new List<KeyPointer<T>>(arrR);
+            node.ChildPointers = new List<KeyPointer<T>>(arrN);
             ReparentChildren(right);
             if (node.isLeafPage)
             {
@@ -260,8 +269,8 @@ namespace RaptorDB
                 return CreateNewRoot(node, right);
             else
             {
-                Node parent = this.LoadNode(node.ParentPageNumber);
-                KeyPointer kp = right.ChildPointers[0].Copy();
+                Node<T> parent = this.LoadNode(node.ParentPageNumber);
+                KeyPointer<T> kp = right.ChildPointers[0].Copy();
                 kp.RecordNum = right.DiskPageNumber;
                 bool found = false;
                 int parentpos = FindNodeOrLowerPosition(parent, node.ChildPointers[0].Key, ref found);
@@ -275,26 +284,29 @@ namespace RaptorDB
                     DirtyNode(parent);
                 }
                 else
+                {
+                    log.Error("should not be here, node not in parent");
                     throw new Exception("should not be here, node not in parent");
+                }
 
                 // cascade root split
-                Node newnode = SplitNode(parent);
+                Node<T> newnode = SplitNode(parent);
                 ReparentChildren(parent);
 
                 return newnode;
             }
         }
 
-        private Node CreateNewRoot(Node left, Node right)
+        private Node<T> CreateNewRoot(Node<T> left, Node<T> right)
         {
-            Node newroot = new Node(this.GetNextPageNumber());
+            Node<T> newroot = new Node<T>(this.GetNextPageNumber());
             DirtyNode(newroot);
             newroot.isLeafPage = false;
             newroot.isRootPage = true;
             left.isRootPage = false;
             right.isRootPage = false;
-            newroot.ChildPointers.Add(new KeyPointer(left.ChildPointers[0].Key, left.DiskPageNumber));
-            newroot.ChildPointers.Add(new KeyPointer(right.ChildPointers[0].Key, right.DiskPageNumber));
+            newroot.ChildPointers.Add(new KeyPointer<T>(left.ChildPointers[0].Key, left.DiskPageNumber));
+            newroot.ChildPointers.Add(new KeyPointer<T>(right.ChildPointers[0].Key, right.DiskPageNumber));
             DirtyNode(left);
             DirtyNode(right);
             ReparentChildren(newroot);
@@ -302,7 +314,7 @@ namespace RaptorDB
             return newroot;
         }
 
-        private Node FindLeaf(Node start, bytearr key)
+        private Node<T> FindLeaf(Node<T> start, T key)
         {
             if (start.isLeafPage)
                 return start;
@@ -310,17 +322,17 @@ namespace RaptorDB
             bool found = false;
             int pos = FindNodeOrLowerPosition(start, key, ref found);
             if (pos == -1) pos = 0;
-            KeyPointer ptr = start.ChildPointers[pos];
+            KeyPointer<T> ptr = start.ChildPointers[pos];
 
-            Node node = this.LoadNode(ptr.RecordNum);
+            Node<T> node = this.LoadNode(ptr.RecordNum);
             return FindLeaf(node, key);
         }
 
-        private void ReplaceParentKey(Node node, bytearr oldkey, bytearr key)
+        private void ReplaceParentKey(Node<T> node, T oldkey, T key)
         {
             if (node.isRootPage == true)
                 return;
-            Node parent = this.LoadNode(node.ParentPageNumber);
+            Node<T> parent = this.LoadNode(node.ParentPageNumber);
             bool found = false;
             int pos = FindNodeOrLowerPosition(parent, oldkey, ref found);
             if (found)
@@ -331,20 +343,20 @@ namespace RaptorDB
             }
         }
 
-        private void ReparentChildren(Node node)
+        private void ReparentChildren(Node<T> node)
         {
             if (node.isLeafPage)
                 return;
-            foreach (KeyPointer kp in node.ChildPointers)
+            foreach (KeyPointer<T> kp in node.ChildPointers)
             {
-                Node child = this.LoadNode(kp.RecordNum);
+                Node<T> child = this.LoadNode(kp.RecordNum);
                 child.ParentPageNumber = node.DiskPageNumber;
                 DirtyNode(child);
             }
             DirtyNode(node);
         }
 
-        private int FindNodeOrLowerPosition(Node node, bytearr key, ref bool found)
+        private int FindNodeOrLowerPosition(Node<T> node, T key, ref bool found)
         {
             if (node.ChildPointers.Count == 0)
                 return 0;
@@ -356,8 +368,8 @@ namespace RaptorDB
             while (first <= last)
             {
                 mid = (first + last) >> 1;
-                KeyPointer k = node.ChildPointers[mid];
-                int compare = Helper.Compare(k.Key, key);
+                KeyPointer<T> k = node.ChildPointers[mid];
+                int compare = k.Key.CompareTo(key);
                 if (compare < 0)
                 {
                     lastlower = mid;

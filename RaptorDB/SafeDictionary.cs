@@ -10,6 +10,11 @@ namespace RaptorDB
         private readonly object _Padlock = new object();
         private readonly Dictionary<TKey, TValue> _Dictionary = new Dictionary<TKey, TValue>();
 
+        public SafeDictionary(int capacity)
+        {
+            _Dictionary = new Dictionary<TKey, TValue>(capacity);
+        }
+
         public SafeDictionary(int capacity, IEqualityComparer<TKey> comp)
         {
             _Dictionary = new Dictionary<TKey, TValue>(capacity, comp);
@@ -37,6 +42,11 @@ namespace RaptorDB
             }
         }
 
+        public ICollection<KeyValuePair<TKey, TValue>> GetList()
+        {
+            return (ICollection<KeyValuePair<TKey, TValue>>)_Dictionary;
+        }
+
         public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
         {
             return ((ICollection<KeyValuePair<TKey, TValue>>)_Dictionary).GetEnumerator();
@@ -52,7 +62,17 @@ namespace RaptorDB
                     _Dictionary[key] = value;
             }
         }
+
+        public void Remove(TKey key)
+        {
+            lock (_Padlock)
+            {
+                _Dictionary.Remove(key);
+            }
+        }
     }
+
+    //------------------------------------------------------------------------------------------------------------------
 
     internal static class FastDateTime
     {
@@ -69,46 +89,54 @@ namespace RaptorDB
         }
     }
 
+    //------------------------------------------------------------------------------------------------------------------
+
     public static class Helper
     {
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        private class MEMORYSTATUSEX
-        {
-            public uint dwLength;
-            public uint dwMemoryLoad;
-            public ulong ullTotalPhys;
-            public ulong ullAvailPhys;
-            public ulong ullTotalPageFile;
-            public ulong ullAvailPageFile;
-            public ulong ullTotalVirtual;
-            public ulong ullAvailVirtual;
-            public ulong ullAvailExtendedVirtual;
-            public MEMORYSTATUSEX()
-            {
-                this.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
-            }
-        }
+        public static MurmurHash2Unsafe MurMur = new MurmurHash2Unsafe();
 
-        [return: MarshalAs(UnmanagedType.Bool)]
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
+        //[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        //private class MEMORYSTATUSEX
+        //{
+        //    public uint dwLength;
+        //    public uint dwMemoryLoad;
+        //    public ulong ullTotalPhys;
+        //    public ulong ullAvailPhys;
+        //    public ulong ullTotalPageFile;
+        //    public ulong ullAvailPageFile;
+        //    public ulong ullTotalVirtual;
+        //    public ulong ullAvailVirtual;
+        //    public ulong ullAvailExtendedVirtual;
+        //    public MEMORYSTATUSEX()
+        //    {
+        //        this.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+        //    }
+        //}
 
-        internal static int GetFreeMemory()
-        {
-            ulong installedMemory = 0;
-            MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
-            if (GlobalMemoryStatusEx(memStatus))
-            {
-                installedMemory = memStatus.ullAvailPhys >> 20;
-            }
-            return (int)installedMemory;
-        }
+        //[return: MarshalAs(UnmanagedType.Bool)]
+        //[DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        //private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
+
+        //internal static int GetFreeMemory()
+        //{
+        //    ulong installedMemory = 0;
+        //    MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
+        //    if (GlobalMemoryStatusEx(memStatus))
+        //    {
+        //        installedMemory = memStatus.ullAvailPhys >> 20;
+        //    }
+        //    return (int)installedMemory;
+        //}
 
         internal static unsafe int ToInt32(byte[] value, int startIndex, bool reverse)
         {
-
             if (reverse)
-                Array.Reverse(value, startIndex, 4);
+            {
+                byte[] b = new byte[4];
+                Buffer.BlockCopy(value, startIndex, b, 0, 4);
+                Array.Reverse(b);
+                return ToInt32(b, 0);
+            }
 
             return ToInt32(value, startIndex);
         }
@@ -124,7 +152,12 @@ namespace RaptorDB
         internal static unsafe long ToInt64(byte[] value, int startIndex, bool reverse)
         {
             if (reverse)
-                Array.Reverse(value, startIndex, 8);
+            {
+                byte[] b = new byte[8];
+                Buffer.BlockCopy(value, startIndex, b, 0, 8);
+                Array.Reverse(b);
+                return ToInt64(b, 0);
+            }
             return ToInt64(value, startIndex);
         }
 
@@ -139,7 +172,12 @@ namespace RaptorDB
         internal static unsafe short ToInt16(byte[] value, int startIndex, bool reverse)
         {
             if (reverse)
-                Array.Reverse(value, startIndex, 2);
+            {
+                byte[] b = new byte[2];
+                Buffer.BlockCopy(value, startIndex, b, 0, 2);
+                Array.Reverse(b);
+                return ToInt16(b, 0);
+            }
             return ToInt16(value, startIndex);
         }
 
@@ -163,7 +201,7 @@ namespace RaptorDB
             return buffer;
         }
 
-        internal static unsafe byte[] GetBytes(int num, bool reverse)
+        public static unsafe byte[] GetBytes(int num, bool reverse)
         {
             byte[] buffer = new byte[4];
             fixed (byte* numRef = buffer)
@@ -195,7 +233,7 @@ namespace RaptorDB
             return left.Length - right.Length;
         }
 
-        internal static int CompareSafe(byte[] left, byte[] right)
+        public static int CompareSafe(byte[] left, byte[] right)
         {
             int c = left.Length;
             if (c > right.Length)
@@ -212,10 +250,16 @@ namespace RaptorDB
             return left.Length - right.Length;
         }
 
-        internal static int Compare(bytearr left, bytearr right)
+        public static int CompareMemCmp(byte[] left, byte[] right)
         {
-            return CompareSafe(left.val, right.val);
+            int c = left.Length;
+            if (c > right.Length)
+                c = right.Length;
+            return memcmp(left, right, c);
         }
+
+        [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int memcmp(byte[] arr1, byte[] arr2, int cnt);
 
         internal static byte[] GetBytes(string s)
         {

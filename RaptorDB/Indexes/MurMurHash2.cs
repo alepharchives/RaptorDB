@@ -4,17 +4,17 @@ using System.Text;
 
 namespace RaptorDB
 {
-    internal class Hash : IIndex
+    internal class Hash<T> : IIndex<T> where T : IComparable<T> , IGetBytes<T>
     {
         private int _BucketCount = 10007;
         private int _BucketItems = 200;
         private List<int> _bucketPointers = new List<int>();
         MurmurHash2Unsafe _hash = new MurmurHash2Unsafe();
-        //private SortedList<int, Bucket> _CachedBuckets = new SortedList<int, Bucket>(Global.MaxItemsBeforeIndexing);
-        private Dictionary<int, Bucket> _CachedBuckets = new Dictionary<int, Bucket>(Global.MaxItemsBeforeIndexing);
-        private IndexFile _indexfile;
+        private SafeDictionary<int, Bucket<T>> _CachedBuckets = new SafeDictionary<int, Bucket<T>>(Global.MaxItemsBeforeIndexing);
+        private IndexFile<T> _indexfile;
         private bool _allowDuplicates;
         private bool _InMemory = false;
+        ILog log = LogManager.GetLogger(typeof(Hash<T>));
 
         public Hash(string indexfilename, byte maxkeysize, short nodeSize, bool allowDuplicates, int bucketcount)
         {
@@ -25,7 +25,7 @@ namespace RaptorDB
             for (int i = 0; i < _BucketCount; i++)
                 _bucketPointers.Add(-1);
 
-            _indexfile = new IndexFile(indexfilename, maxkeysize, nodeSize, bucketcount, INDEXTYPE.HASH);
+            _indexfile = new IndexFile<T>(indexfilename, maxkeysize, nodeSize, bucketcount, INDEXTYPE.HASH);
 
             _BucketItems = _indexfile._PageNodeCount;
 
@@ -47,16 +47,16 @@ namespace RaptorDB
             }
         }
 
-        public bool Get(byte[] key, out int offset)
+        public bool Get(T key, out int offset)
         {
             offset = -1;
-            Bucket b = FindBucket(key);
+            Bucket<T> b = FindBucket(key);
             return SearchBucket(b, key, ref offset);
         }
 
-        public void Set(byte[] key, int offset)
+        public void Set(T key, int offset)
         {
-            Bucket b = FindBucket(key);
+            Bucket<T> b = FindBucket(key);
             b = SetBucket(key, offset, b);
         }
 
@@ -68,10 +68,12 @@ namespace RaptorDB
 
         public void Shutdown()
         {
-            Commit();
+            //Commit();
+            SaveIndex();
+            _indexfile.Shutdown();
         }
 
-        public IEnumerable<int> Enumerate(byte[] fromkey, int start, int count)
+        public IEnumerable<int> Enumerate(T fromkey, int start, int count)
         {
             throw new NotImplementedException();
         }
@@ -81,13 +83,13 @@ namespace RaptorDB
             return _indexfile.CountBuckets();
         }
 
-        public IEnumerable<int> GetDuplicates(byte[] key)
+        public IEnumerable<int> GetDuplicates(T key)
         {
             if (_allowDuplicates)
             {
-                Bucket b = FindBucket(key);
+                Bucket<T> b = FindBucket(key);
                 bool found = false;
-                int pos = FindPointerOrLower(b, new bytearr(key), out found);
+                int pos = FindPointerOrLower(b, key, out found);
 
                 if (found)
                 {
@@ -103,9 +105,9 @@ namespace RaptorDB
 
         public void SaveIndex()
         {
-            if (_indexfile.Commit(_CachedBuckets))
+            if (_indexfile.Commit(_CachedBuckets.GetList()))
             {
-                _CachedBuckets = new Dictionary<int, Bucket>(Global.MaxItemsBeforeIndexing);
+                _CachedBuckets = new SafeDictionary<int, Bucket<T>>(Global.MaxItemsBeforeIndexing);
             }
             _indexfile.SaveBucketList(_bucketPointers);
         }
@@ -113,14 +115,14 @@ namespace RaptorDB
 
         #region [   P R I V A T E   M E T H O D S   ]
 
-        private Bucket SetBucket(byte[] key, int offset, Bucket b)
+        private Bucket<T> SetBucket(T key, int offset, Bucket<T> b)
         {
             bool found = false;
-            int pos = FindPointerOrLower(b, new bytearr(key), out found);
+            int pos = FindPointerOrLower(b, key, out found);
 
             if (found)
             {
-                KeyPointer p = b.Pointers[pos];
+                KeyPointer<T> p = b.Pointers[pos];
                 int v = p.RecordNum;
 
                 // duplicate found     
@@ -141,7 +143,7 @@ namespace RaptorDB
             {
                 if (b.Pointers.Count < _BucketItems)
                 {
-                    KeyPointer k = new KeyPointer(new bytearr(key), offset);
+                    KeyPointer<T> k = new KeyPointer<T>(key, offset);
                     pos++;
                     if (pos < b.Pointers.Count)
                         b.Pointers.Insert(pos, k);
@@ -159,7 +161,7 @@ namespace RaptorDB
                     }
                     else
                     {
-                        Bucket newb = new Bucket(_indexfile.GetNewPageNumber());
+                        Bucket<T> newb = new Bucket<T>(_indexfile.GetNewPageNumber());
                         b.NextPageNumber = newb.DiskPageNumber;
                         DirtyBucket(b);
                         SetBucket(key, offset, newb);
@@ -169,13 +171,13 @@ namespace RaptorDB
             return b;
         }
 
-        private bool SearchBucket(Bucket b, byte[] key, ref int offset)
+        private bool SearchBucket(Bucket<T> b, T key, ref int offset)
         {
             bool found = false;
-            int pos = FindPointerOrLower(b, new bytearr(key), out found);
+            int pos = FindPointerOrLower(b, key, out found);
             if (found)
             {
-                KeyPointer k = b.Pointers[pos];
+                KeyPointer<T> k = b.Pointers[pos];
                 offset = k.RecordNum;
                 return true;
             }
@@ -190,17 +192,18 @@ namespace RaptorDB
             return false;
         }
 
-        private void DirtyBucket(Bucket b)
+        private void DirtyBucket(Bucket<T> b)
         {
             if (b.isDirty)
                 return;
 
             b.isDirty = true;
-            if (_CachedBuckets.ContainsKey(b.DiskPageNumber) == false)
+            Bucket<T> bb = null;
+            if (_CachedBuckets.TryGetValue(b.DiskPageNumber, out bb) == false)
                 _CachedBuckets.Add(b.DiskPageNumber, b);
         }
 
-        private int FindPointerOrLower(Bucket b, bytearr key, out bool found)
+        private int FindPointerOrLower(Bucket<T> b, T key, out bool found)
         {
             found = false;
             if (b.Pointers.Count == 0)
@@ -213,8 +216,8 @@ namespace RaptorDB
             while (first <= last)
             {
                 mid = (first + last) >> 1;
-                KeyPointer k = b.Pointers[mid];
-                int compare = Helper.Compare(k.Key, key);
+                KeyPointer<T> k = b.Pointers[mid];
+                int compare = k.Key.CompareTo(key);
                 if (compare < 0)
                 {
                     lastlower = mid;
@@ -234,10 +237,10 @@ namespace RaptorDB
             return lastlower;
         }
 
-        private Bucket FindBucket(byte[] key)
+        private Bucket<T> FindBucket(T key)
         {
-            Bucket b;
-            uint h = _hash.Hash(key);
+            Bucket<T> b;
+            uint h = _hash.Hash(key.GetBytes());
 
             int bucketNumber = (int)(h % _BucketCount);
 
@@ -255,21 +258,22 @@ namespace RaptorDB
             return b;
         }
 
-        private Bucket LoadBucket(int pagenumber)
+        private Bucket<T> LoadBucket(int pagenumber)
         {
-            Bucket b;
+            Bucket<T> b;
             // try cache first
             if (_CachedBuckets.TryGetValue(pagenumber, out b))
                 return b;
             // else load from disk and put in cache
             b = _indexfile.LoadBucketFromPage(pagenumber);
+            _CachedBuckets.Add(pagenumber, b);
 
             return b;
         }
 
-        private Bucket CreateBucket(int bucketNumber)
+        private Bucket<T> CreateBucket(int bucketNumber)
         {
-            Bucket b = new Bucket(_indexfile.GetNewPageNumber());
+            Bucket<T> b = new Bucket<T>(_indexfile.GetNewPageNumber());
             b.BucketNumber = bucketNumber;
             // get next free indexfile pointer offset
 
@@ -278,7 +282,7 @@ namespace RaptorDB
         #endregion
     }
 
-    internal class MurmurHash2Unsafe
+    public class MurmurHash2Unsafe
     {
         public UInt32 Hash(Byte[] data)
         {

@@ -5,39 +5,16 @@ using System.IO;
 
 namespace RaptorDB
 {
-    public class ByteArrayComparer : IEqualityComparer<byte[]>
-    {
-        public bool Equals(byte[] a, byte[] b)
-        {
-            if (a == null || b == null)
-                return a == b;
-            if (a.Length != b.Length)
-                return false;
-            for (int i = 0; i < a.Length; i++)
-                if (a[i] != b[i])
-                    return false;
-            return true;
-        }
-
-        public int GetHashCode(byte[] x)
-        {
-            if (x == null)
-                throw new ArgumentNullException();
-            int iHash = 0;
-            for (int i = 0; i < x.Length; ++i)
-                iHash ^= (x[i] << ((0x03 & i) << 3));
-            return iHash;
-        }
-    }
-
-    internal class LogFile
+    internal class LogFile<T> where T : IGetBytes<T> , IEquatable<T>, IEqualityComparer<T>
     {
         public LogFile()
         {
+            _T = Activator.CreateInstance<T>();
         }
 
         public LogFile(string filename, int number, int maxkeylen, string logNumberFormat)
         {
+            _T = Activator.CreateInstance<T>();
             // create a log file 
             FileName = filename + number.ToString(logNumberFormat);
             Number = number;
@@ -46,25 +23,24 @@ namespace RaptorDB
             _file = new FileStream(FileName, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read);
             WriteLogHeader();
         }
+        private T _T = default(T);
 
         public int Number;
         public string FileName;
         public bool Readonly;
         public int CurrentCount = 0;
+        
 
         byte[] _header = new byte[] { 
             (byte)'M', (byte)'G', (byte)'L', 
             0 // [maxkeylen] 
         };
 
-        internal SafeDictionary<byte[], int> _memCache = new SafeDictionary<byte[], int>(
-                    Global.MaxItemsBeforeIndexing,
-                    new ByteArrayComparer());
-        internal SafeDictionary<byte[], List<int>> _duplicates = new SafeDictionary<byte[], List<int>>(
-                    Global.MaxItemsBeforeIndexing,
-                    new ByteArrayComparer());
+        internal SafeDictionary<T, int> _memCache = new SafeDictionary<T, int>(Global.MaxItemsBeforeIndexing, default(T));
+        internal SafeDictionary<T, List<int>> _duplicates = new SafeDictionary<T, List<int>>(Global.MaxItemsBeforeIndexing , default(T));
         private Stream _file;
         private int _maxKeyLen;
+        ILog log = LogManager.GetLogger(typeof(LogFile<T>));
 
 
         private void WriteLogHeader()
@@ -104,7 +80,7 @@ namespace RaptorDB
         public void DeleteLog()
         {
             Shutdown();
-            //Console.Write(" D" + Number + " ");
+            log.Debug("Deleting log file : " + this.Number);
             File.Delete(FileName);
         }
 
@@ -117,8 +93,7 @@ namespace RaptorDB
                 CurrentCount++;
                 int l = Helper.ToInt32(rec, 0);
                 byte of = rec[4];
-                byte[] k = new byte[of];
-                Buffer.BlockCopy(rec, 5, k, 0, of);
+                T k = _T.GetObject(rec, 5, of);
                 _memCache.Add(k, l);
             }
         }
@@ -139,7 +114,7 @@ namespace RaptorDB
             return ok;
         }
 
-        private void SaveToLogFile(byte[] key, int offset)
+        private void SaveToLogFile(T key, int offset)
         {
             if (Readonly == false)
             {
@@ -152,20 +127,20 @@ namespace RaptorDB
             }
         }
 
-        private byte[] CreateRecord(byte[] key, int offset)
+        private byte[] CreateRecord(T key, int offset)
         {
             // create record
             byte[] rec = new byte[4 + 1 + _maxKeyLen];
-            byte[] off = Helper.GetBytes(offset,false);
+            byte[] off = Helper.GetBytes(offset, false);
             Buffer.BlockCopy(off, 0, rec, 0, off.Length);
-            byte[] str = key;
+            byte[] str = key.GetBytes();
             rec[4] = (byte)str.Length;
             int len = (str.Length < _maxKeyLen ? str.Length : _maxKeyLen);
             Buffer.BlockCopy(str, 0, rec, off.Length + 1, len);
             return rec;
         }
 
-        public int Get(byte[] k)
+        public int Get(T k)
         {
             int l = -1;
             bool b = _memCache.TryGetValue(k, out l);
@@ -175,7 +150,7 @@ namespace RaptorDB
                 return -1;
         }
 
-        public void Set(byte[] k, int val)
+        public void Set(T k, int val)
         {
             if (Readonly == false)
             {
@@ -211,7 +186,7 @@ namespace RaptorDB
             }
         }
 
-        public List<int> GetDuplicates(byte[] key)
+        public List<int> GetDuplicates(T key)
         {
             List<int> dups;
             if (_duplicates.TryGetValue(key, out dups))
@@ -220,10 +195,5 @@ namespace RaptorDB
             }
             return new List<int>();
         }
-
-        //public IEnumerator<KeyValuePair<byte[], int>> GetEnumerator()
-        //{
-        //    return _memCache.GetEnumerator();
-        //}
     }
 }

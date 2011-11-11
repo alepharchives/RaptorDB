@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Collections;
 
 namespace RaptorDB
 {
-    internal class IndexFile
+    internal class IndexFile<T> where T : IGetBytes<T>
     {
         FileStream _file = null;
         private byte[] _FileHeader = new byte[] {
@@ -33,11 +34,13 @@ namespace RaptorDB
         private int _rowSize;
         internal int _BucketCount = 11;
         internal INDEXTYPE _indexType = INDEXTYPE.BTREE;
-
+        ILog log = LogManager.GetLogger(typeof(IndexFile<T>));
         private BitmapIndex _bitmap;
+        private T _T = default(T);
 
         public IndexFile(string filename, byte maxKeySize, short pageNodeCount, int bucketcount, INDEXTYPE type)
         {
+            _T = Activator.CreateInstance<T>();
             _maxKeySize = maxKeySize;
             _PageNodeCount = pageNodeCount;
             _rowSize = (_maxKeySize + 1 + 4 + 4);
@@ -68,7 +71,7 @@ namespace RaptorDB
             // bitmap duplicates 
             _bitmap = new BitmapIndex(Path.GetDirectoryName(filename), Path.GetFileNameWithoutExtension(filename));
 
-            // FEATURE : if index chk exists rollback changes to index            
+            // FEATURE : if index chk exists rollback changes to index         
         }
 
         #region [  C o m m o n  ]
@@ -82,20 +85,15 @@ namespace RaptorDB
             return _bitmap.GetFreeRecordNumber();
         }
 
-        //public WAHBitArray GetDuplicatesBitmap(int recno)
-        //{
-        //    return _bitmap.GetBitmap(recno);
-        //}
-
         public IEnumerable<int> GetDuplicatesRecordNumbers(int recno)
         {
             return _bitmap.GetBitmapNoCache(recno).GetBitIndexes(true);
         }
 
-        public long CountNodes(Node root)
+        public long CountNodes(Node<T> root)
         {
             long c = 0;
-            Node n = root;
+            Node<T> n = root;
             if (n == null)
                 return 0;
             while (n.isLeafPage == false)
@@ -187,7 +185,7 @@ namespace RaptorDB
 
             if (_indexType == INDEXTYPE.BTREE)
             {
-                Node n = new Node(3, -1, new List<KeyPointer>(), 0, -1);
+                Node<T> n = new Node<T>(3, -1, new List<KeyPointer<T>>(), 0, -1);
                 SaveNode(n);
             }
         }
@@ -241,30 +239,35 @@ namespace RaptorDB
 
         public void Shutdown()
         {
-            _file.Flush();
-            _file.Close();
+            log.Debug("Shutdown IndexFile");
+            if (_file != null)
+            {
+                _file.Flush();
+                _file.Close();
+            }
+            _file = null;
             _bitmap.Shutdown();
         }
 
         #endregion
 
         #region [  N O D E S  ]
-        public Node GetRoot()
+        public Node<T> GetRoot()
         {
             return LoadNodeFromPageNumber(_CurrentRootPage);
         }
 
-        public bool Commit(IDictionary<int, Node> nodes)
+        public bool Commit(ICollection<KeyValuePair<int, Node<T>>> nodes)
         {
-            foreach (Node n in nodes.Values)
+            foreach (KeyValuePair<int, Node<T>> n in nodes)
             {
-                if (n.isDirty)
+                if (n.Value.isDirty)
                 {
-                    SaveNode(n);
-                    if (n.isRootPage)
+                    SaveNode(n.Value);
+                    if (n.Value.isRootPage)
                     {
-                        WriteHeader(n.DiskPageNumber);
-                        _CurrentRootPage = n.DiskPageNumber;
+                        WriteHeader(n.Value.DiskPageNumber);
+                        _CurrentRootPage = n.Value.DiskPageNumber;
                     }
                 }
             }
@@ -275,7 +278,7 @@ namespace RaptorDB
             return true;
         }
 
-        private void SaveNode(Node node)
+        private void SaveNode(Node<T> node)
         {
             int pnum = node.DiskPageNumber;
             if (pnum > _LastPageNumber)
@@ -306,15 +309,17 @@ namespace RaptorDB
             // node children
             for (int i = 0; i < node.Count; i++)
             {
-                KeyPointer kp = node.ChildPointers[i];
+                KeyPointer<T> kp = node.ChildPointers[i];
                 int idx = index + _rowSize * i;
-                byte size = (byte)kp.Key.val.Length;
+
+                // key bytes
+                byte[] kk = node.ChildPointers[i].Key.GetBytes();
+                byte size = (byte)kk.Length;
                 if (size > _maxKeySize)
                     size = _maxKeySize;
                 // key size = 1 byte
                 page[idx] = size;
-                // key bytes
-                Buffer.BlockCopy(node.ChildPointers[i].Key.val, 0, page, idx + 1, page[idx]);
+                Buffer.BlockCopy(kk, 0, page, idx + 1, page[idx]);
                 // offset = 4 bytes
                 b = Helper.GetBytes(kp.RecordNum, false);
                 Buffer.BlockCopy(b, 0, page, idx + 1 + _maxKeySize, b.Length);
@@ -326,7 +331,7 @@ namespace RaptorDB
             //_file.Flush();
         }
 
-        public Node LoadNodeFromPageNumber(int number)
+        public Node<T> LoadNodeFromPageNumber(int number)
         {
             SeekPage(number);
             byte[] b = new byte[_PageLength];
@@ -336,25 +341,24 @@ namespace RaptorDB
             {
                 // create node here
                 int parentpage = Helper.ToInt32(b, 7);
-                List<KeyPointer> list = new List<KeyPointer>();
+                List<KeyPointer<T>> list = new List<KeyPointer<T>>();
                 short count = Helper.ToInt16(b, 5);
                 if (count > _PageNodeCount)
                     throw new Exception("Count > node size");
                 int rightpage = Helper.ToInt32(b, 11);
                 int index = _BlockHeader.Length;
-                
+
                 for (int i = 0; i < count; i++)
                 {
                     int idx = index + _rowSize * i;
                     byte ks = b[idx];
-                    byte[] key = new byte[ks];
-                    Buffer.BlockCopy(b, idx + 1, key, 0, ks);
+                    T key = _T.GetObject(b, idx + 1, ks);
                     int offset = Helper.ToInt32(b, idx + 1 + _maxKeySize);
                     int duppage = Helper.ToInt32(b, idx + 1 + _maxKeySize + 4);
-                    KeyPointer kp = new KeyPointer(new bytearr(key), offset, duppage);
+                    KeyPointer<T> kp = new KeyPointer<T>(key, offset, duppage);
                     list.Add(kp);
                 }
-                Node n = new Node(b[4], parentpage, list,/* dups,*/ number, rightpage);
+                Node<T> n = new Node<T>(b[4], parentpage, list, number, rightpage);
                 return n;
             }
             else
@@ -390,10 +394,9 @@ namespace RaptorDB
             }
             _file.Seek(_FileHeader.Length, SeekOrigin.Begin);
             _file.Write(b, 0, b.Length);
-            //_file.Flush();
         }
 
-        public void SaveBucket(Bucket bucket)
+        public void SaveBucket(Bucket<T> bucket)
         {
             int pnum = bucket.DiskPageNumber;
             if (pnum > _LastPageNumber)
@@ -424,15 +427,16 @@ namespace RaptorDB
             // bucket children
             for (int i = 0; i < bucket.Count; i++)
             {
-                KeyPointer kp = bucket.Pointers[i];
+                KeyPointer<T> kp = bucket.Pointers[i];
                 int idx = index + _rowSize * i;
-                byte size = (byte)kp.Key.val.Length;
+                // key bytes
+                byte[] kk = bucket.Pointers[i].Key.GetBytes();
+                byte size = (byte)kk.Length;
                 if (size > _maxKeySize)
                     size = _maxKeySize;
                 // key size = 1 byte
                 page[idx] = size;
-                // key bytes
-                Buffer.BlockCopy(bucket.Pointers[i].Key.val, 0, page, idx + 1, page[idx]);
+                Buffer.BlockCopy(kk, 0, page, idx + 1, page[idx]);
                 // offset = 4 bytes
                 b = Helper.GetBytes(kp.RecordNum, false);
                 Buffer.BlockCopy(b, 0, page, idx + 1 + _maxKeySize, b.Length);
@@ -442,10 +446,9 @@ namespace RaptorDB
             }
 
             _file.Write(page, 0, page.Length);
-            //_file.Flush();
         }
 
-        public Bucket LoadBucketFromPage(int page)
+        public Bucket<T> LoadBucketFromPage(int page)
         {
             SeekPage(page);
             byte[] b = new byte[_PageLength];
@@ -455,7 +458,7 @@ namespace RaptorDB
             {
                 // create node here
                 int bucketnum = Helper.ToInt32(b, 7);
-                List<KeyPointer> list = new List<KeyPointer>();
+                List<KeyPointer<T>> list = new List<KeyPointer<T>>();
                 short count = Helper.ToInt16(b, 5);
                 if (count > _PageNodeCount)
                     throw new Exception("Count > node size");
@@ -466,28 +469,27 @@ namespace RaptorDB
                 {
                     int idx = index + _rowSize * i;
                     byte ks = b[idx];
-                    byte[] key = new byte[ks];
-                    Buffer.BlockCopy(b, idx + 1, key, 0, ks);
+                    T key = _T.GetObject(b, idx + 1, ks);
                     int offset = Helper.ToInt32(b, idx + 1 + _maxKeySize);
                     int duppage = Helper.ToInt32(b, idx + 1 + _maxKeySize + 4);
 
-                    KeyPointer kp = new KeyPointer(new bytearr(key), offset, duppage);
+                    KeyPointer<T> kp = new KeyPointer<T>(key, offset, duppage);
                     list.Add(kp);
                 }
-                
-                Bucket n = new Bucket(b[4], bucketnum, list,/* dups,*/ page, nextpage);
+
+                Bucket<T> n = new Bucket<T>(b[4], bucketnum, list, page, nextpage);
                 return n;
             }
             else
                 throw new Exception("Page read error");
         }
 
-        public bool Commit(IDictionary<int, Bucket> buckets)
+        public bool Commit(ICollection<KeyValuePair<int, Bucket<T>>> buckets)
         {
-            foreach (Bucket n in buckets.Values)
+            foreach (KeyValuePair<int, Bucket<T>> n in buckets)
             {
-                if (n.isDirty)
-                    SaveBucket(n);
+                if (n.Value.isDirty)
+                    SaveBucket(n.Value);
             }
             _file.Flush();
             // free memory config

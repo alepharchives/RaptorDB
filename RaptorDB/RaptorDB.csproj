@@ -24,7 +24,7 @@
     <OldToolsVersion>0.0</OldToolsVersion>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
-    <TargetFrameworkProfile />
+    <TargetFrameworkProfile>Client</TargetFrameworkProfile>
     <PublishUrl>publish\</PublishUrl>
     <Install>true</Install>
     <InstallFrom>Disk</InstallFrom>
@@ -61,7 +61,7 @@
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <OutputPath>bin\Release\</OutputPath>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <BaseAddress>285212672</BaseAddress>
     <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
     <ConfigurationOverrideFile>
@@ -95,6 +95,7 @@
     <Compile Include="AssemblyInfo.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="DataTypes\DataTypes.cs" />
     <Compile Include="Global.cs" />
     <Compile Include="IIndex.cs" />
     <Compile Include="Indexes\BitmapIndex.cs" />
@@ -103,7 +104,9 @@
     <Compile Include="Indexes\MurMurHash2.cs" />
     <Compile Include="Indexes\Node.cs" />
     <Compile Include="Indexes\WAHBitarray2.cs" />
+    <Compile Include="mylogger.cs" />
     <Compile Include="RaptorDB.cs" />
+    <Compile Include="RaptorDBString.cs" />
     <Compile Include="SafeDictionary.cs" />
     <Compile Include="Storage\LogFile.cs" />
     <Compile Include="Storage\StorageFile.cs" />
