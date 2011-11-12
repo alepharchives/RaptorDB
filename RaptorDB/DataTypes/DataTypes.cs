@@ -78,6 +78,17 @@ namespace RaptorDB
             Buffer.BlockCopy(buffer, offset, b, 0, count);
             return new rdbByteArray(b);
         }
+
+        public override bool Equals(object obj)
+        {
+            int i = Helper.CompareUnSafe(this.val, ((rdbByteArray)obj).val);
+            return i == 0 ? true : false;
+        }
+
+        public override int GetHashCode()
+        {
+            return this.GetHashCode(this);
+        }
     }
 
     //----------------------------------------------------------------------------------------------------
@@ -126,6 +137,16 @@ namespace RaptorDB
         public rdbInt GetObject(byte[] buffer, int offset, int count)
         {
             return new rdbInt(Helper.ToInt32(buffer, offset));
+        }
+
+        public override bool Equals(object obj)
+        {
+            return this._i == ((rdbInt)obj)._i;
+        }
+
+        public override int GetHashCode()
+        {
+            return _i;
         }
     }
 

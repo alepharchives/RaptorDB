@@ -125,7 +125,6 @@ namespace RaptorDB
         public bool Get(byte[] key, out byte[] val)
         {
             uint hc = _mur.Hash(key);
-            //byte[] k = Helper.GetBytes((int)hc, false);
 
             if (_rap.Get(new rdbInt(hc), out val))
             {

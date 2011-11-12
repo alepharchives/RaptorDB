@@ -5,7 +5,7 @@ using System.IO;
 
 namespace RaptorDB
 {
-    internal class LogFile<T> where T : IGetBytes<T> , IEquatable<T>, IEqualityComparer<T>
+    internal class LogFile<T> where T : IRDBDataType<T>
     {
         public LogFile()
         {
@@ -36,8 +36,8 @@ namespace RaptorDB
             0 // [maxkeylen] 
         };
 
-        internal SafeDictionary<T, int> _memCache = new SafeDictionary<T, int>(Global.MaxItemsBeforeIndexing, default(T));
-        internal SafeDictionary<T, List<int>> _duplicates = new SafeDictionary<T, List<int>>(Global.MaxItemsBeforeIndexing , default(T));
+        internal SafeDictionary<T, int> _memCache = new SafeDictionary<T, int>(Global.MaxItemsBeforeIndexing, EqualityComparer<T>.Default);
+        internal SafeDictionary<T, List<int>> _duplicates = new SafeDictionary<T, List<int>>(Global.MaxItemsBeforeIndexing , EqualityComparer<T>.Default);
         private Stream _file;
         private int _maxKeyLen;
         ILog log = LogManager.GetLogger(typeof(LogFile<T>));

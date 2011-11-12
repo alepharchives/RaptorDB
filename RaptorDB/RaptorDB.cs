@@ -13,7 +13,7 @@ namespace RaptorDB
         HASH = 1
     }
 
-    public class RaptorDB<T> : IDisposable where T : IComparable<T>, IGetBytes<T>, IEquatable<T>, IEqualityComparer<T>
+    public class RaptorDB<T> : IDisposable where T : IRDBDataType<T>
     {
         public RaptorDB(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype, bool disablethread)
         {
@@ -181,6 +181,7 @@ namespace RaptorDB
             val = null;
             T k = key;
             _PauseIndex = true;
+            while (_indexing) Thread.Sleep(1);
             // check in current log
             off = _currentLOG.Get(k);
             if (off > -1)

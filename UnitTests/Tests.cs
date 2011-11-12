@@ -523,10 +523,10 @@ namespace UnitTests
             }
             Console.WriteLine("flushing index...");
 
-            rap.SaveIndex();
+            //rap.SaveIndex();
 
             Console.WriteLine("fetching values...");
-
+            int notfound = 0;
             for (int i = 0; i < 100000; i++)
             {
                 string str = "";
@@ -536,8 +536,15 @@ namespace UnitTests
                         Assert.Fail("value does not match");
                 }
                 else
-                    Assert.Fail("value not found");
+                    notfound++;// Assert.Fail("value not found");
             }
+            if (notfound > 0)
+            {
+                Console.WriteLine("values not found = " + notfound);
+                Assert.Fail("values not found = " + notfound);
+            }
+            else
+                Console.WriteLine("ALL OK");
             rap.Shutdown();
         }
 
