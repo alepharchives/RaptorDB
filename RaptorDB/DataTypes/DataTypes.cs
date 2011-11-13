@@ -5,7 +5,7 @@ using System.Text;
 
 namespace RaptorDB
 {
-    public interface IRDBDataType<T> : IComparable<T>, IGetBytes<T>, IEqualityComparer<T>, IEquatable<T>
+    public interface IRDBDataType<T> : IComparable<T>, IGetBytes<T>, IEqualityComparer<T>, IEquatable<T> 
     {
     }
     
@@ -192,6 +192,16 @@ namespace RaptorDB
         public rdbLong GetObject(byte[] buffer, int offset, int count)
         {
             return new rdbLong(Helper.ToInt64(buffer, offset));
+        }
+
+        public override bool Equals(object obj)
+        {
+            return this._i == ((rdbLong)obj)._i;
+        }
+
+        public override int GetHashCode()
+        {
+            return _i.GetHashCode();
         }
     }
 }

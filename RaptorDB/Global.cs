@@ -21,5 +21,7 @@ namespace RaptorDB
         public static int BitmapOffsetSwitchOverCount = 10;
 
         public static int FlushIndexerAfterThisManyMillion = 20;
+
+        public static bool SaveMemoryIndexOnShutdown = false;
     }
 }

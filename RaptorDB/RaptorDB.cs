@@ -15,9 +15,9 @@ namespace RaptorDB
 
     public class RaptorDB<T> : IDisposable where T : IRDBDataType<T>
     {
-        public RaptorDB(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype, bool disablethread)
+        public RaptorDB(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
         {
-            Initialize(Filename, MaxKeysize, AllowDuplicateKeys, idxtype, disablethread);
+            Initialize(Filename, MaxKeysize, AllowDuplicateKeys, idxtype);
         }
 
         private ILog log = LogManager.GetLogger(typeof(RaptorDB<T>));
@@ -59,7 +59,7 @@ namespace RaptorDB
 
         public static RaptorDB<T> Open(string Filename, byte MaxKeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
         {
-            return new RaptorDB<T>(Filename, MaxKeysize, AllowDuplicateKeys, idxtype, false);
+            return new RaptorDB<T>(Filename, MaxKeysize, AllowDuplicateKeys, idxtype);
         }
 
         //public void CompactFiles()
@@ -88,7 +88,7 @@ namespace RaptorDB
             _isInternalOPRunning = true;
             // wait for indexing thread to stop
             while (_indexing) Thread.Sleep(10);
-               
+
             if (flushMemoryToDisk)
             {
                 // flush current memory log
@@ -162,13 +162,7 @@ namespace RaptorDB
         public long Count()
         {
             if (_Count == -1)
-            {
-                //long c = 0;
-                //foreach (var i in _logs)
-                //    c += i.CurrentCount;
-                //c += _currentLOG.CurrentCount;
-                _Count = _archive.Count();// +c;
-            }
+                _Count = _archive.Count();
 
             return _Count;
         }
@@ -180,6 +174,7 @@ namespace RaptorDB
             int off;
             val = null;
             T k = key;
+
             _PauseIndex = true;
             while (_indexing) Thread.Sleep(1);
             // check in current log
@@ -203,6 +198,7 @@ namespace RaptorDB
                     return true;
                 }
             }
+
 
             // search index here
             if (_index.Get(k, out off))
@@ -238,39 +234,42 @@ namespace RaptorDB
             return true;
         }
 
+        private object _shutdownlock = new object();
         public void Shutdown()
         {
-            if (_index != null)
+            lock (_shutdownlock)
             {
-                log.Debug("Shutting down");
-            }
-            Console.WriteLine("Shutting down...");
-            //_shutdown = true;
-
-            SaveIndex(true);
-            _shutdown = true;
-            
-            if (_index != null)
-                _index.Shutdown();
-            if (_archive != null)
-                _archive.Shutdown();
-            if (_currentLOG != null)
-                _currentLOG.Shutdown();
-            if (_logs != null)
-            {
-                foreach (var l in _logs)
+                if (_index != null)
                 {
-                    if (l != null)
-                        l.Close();
+                    log.Debug("Shutting down");
                 }
+                Console.WriteLine("Shutting down...");
+                _shutdown = true;
+                while (_indexing) Thread.Sleep(10);
+                SaveIndex(Global.SaveMemoryIndexOnShutdown);
+
+                if (_index != null)
+                    _index.Shutdown();
+                if (_archive != null)
+                    _archive.Shutdown();
+                if (_currentLOG != null)
+                    _currentLOG.Shutdown();
+                if (_logs != null)
+                {
+                    foreach (var l in _logs)
+                    {
+                        if (l != null)
+                            l.Close();
+                    }
+                }
+                _logs = null;
+                _index = null;
+                _archive = null;
+                _currentLOG = null;
+                log.Debug("Shutting down log");
+                _IndexerThread = null;
+                LogManager.Shutdown();
             }
-            _logs = null;
-            _index = null;
-            _archive = null;
-            _currentLOG = null;
-            log.Debug("Shutting down log");
-            _IndexerThread = null;
-            LogManager.Shutdown();
         }
 
         #region [            P R I V A T E     M E T H O D S              ]
@@ -289,7 +288,7 @@ namespace RaptorDB
             _currentLOG = newlog;
         }
 
-        private void Initialize(string filename, byte maxkeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype, bool disablethread)
+        private void Initialize(string filename, byte maxkeysize, bool AllowDuplicateKeys, INDEXTYPE idxtype)
         {
             _idxType = idxtype;
             _MaxKeySize = maxkeysize;
@@ -321,8 +320,7 @@ namespace RaptorDB
 
             log.Debug("Starting indexer thread");
             // create indexing thread
-            if (disablethread == false)
-                StartIndexerThread();
+            StartIndexerThread();
 
             //_ThrottleThread = new Thread(new ThreadStart(Throttle));
             //_ThrottleThread.IsBackground = true;
@@ -431,8 +429,10 @@ namespace RaptorDB
                                             }
                                             while (_PauseIndex && _shutdown == false)
                                             {
+                                                _indexing = false;
                                                 Thread.Sleep(10);
                                             }
+                                            _indexing = true;
                                         }
                                     }
                                 }
@@ -455,8 +455,10 @@ namespace RaptorDB
                                 }
                                 while (_PauseIndex && _shutdown == false)
                                 {
+                                    _indexing = false;
                                     Thread.Sleep(10);
                                 }
+                                _indexing = true;
                             }
                             #endregion
                         }

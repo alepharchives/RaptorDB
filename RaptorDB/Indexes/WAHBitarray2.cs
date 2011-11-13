@@ -258,7 +258,7 @@ namespace RaptorDB
                     {
                         for (int j = 0; j < 32; j++)
                         {
-                            bool b = internalGet(i << 5 + j);
+                            bool b = internalGet((i << 5) + j);
                             if (b == ones)
                                 yield return (i << 5) + j;
                         }

@@ -98,6 +98,7 @@ namespace UnitTests
             //    string sss = System.Text.Encoding.UTF8.GetString(b.Value);
             //    Console.Write(g);
             //}
+            rap.Dispose();
         }
 
 
@@ -200,7 +201,7 @@ namespace UnitTests
         [Test]
         public static void Duplicates_Set_and_Fetch_btree()
         {
-            var db = new RaptorDB.RaptorDBGuid("c:\\RaptorDbTest\\duptestfetch");//, 16, true, INDEXTYPE.BTREE);
+            var db = new RaptorDB<rdbByteArray>("c:\\RaptorDbTest\\duptestfetch", 16, true, INDEXTYPE.BTREE);
             //db.InMemoryIndex = true;
             //db.IndexingTimerSeconds = 1000;
             int guidcount = 1000;
@@ -214,7 +215,7 @@ namespace UnitTests
                 for (int i = 0; i < dupcount; i++)
                 {
                     string s = "" + g + " " + i;
-                    db.Set(g, Encoding.UTF8.GetBytes(s));
+                    db.Set(new rdbByteArray( g.ToByteArray()), Encoding.UTF8.GetBytes(s));
                 }
             }
             db.SaveIndex();
@@ -222,7 +223,7 @@ namespace UnitTests
             foreach (Guid g in guids)
             {
                 int j = 0;
-                foreach (int i in db.GetDuplicates(g.ToByteArray()))
+                foreach (int i in db.GetDuplicates(new rdbByteArray( g.ToByteArray())))
                 {
                     byte[] b = db.FetchDuplicate(i);
                     string s = Encoding.UTF8.GetString(b);
@@ -338,13 +339,15 @@ namespace UnitTests
                         Console.WriteLine("time = " + DateTime.Now.Subtract(dt).TotalSeconds);
                 }
             }
-            Console.WriteLine("Flushing index...");
-            db.SaveIndex();
+            if (flush)
+            {
+                Console.WriteLine("Flushing index...");
+                db.SaveIndex();
+            }
             Console.WriteLine(count.ToString("#,#") + " save total time = " + DateTime.Now.Subtract(dt).TotalSeconds);
             dt = DateTime.Now;
             if (skiplist == false)
             {
-                //db.Shutdown();
                 db.Dispose();
                 db = null;
                 db = RaptorDB.RaptorDB<rdbByteArray>.Open("c:\\RaptorDbTest\\" + fname + type, 16, false, type);
@@ -512,7 +515,7 @@ namespace UnitTests
 
 
         [Test]
-        public static void RaptodDBString_test()
+        public static void RaptorDBString_test()
         {
             Console.WriteLine("unlimited key size test");
             var rap = new RaptorDBString(@"c:\raptordbtest\longstringkey", false);

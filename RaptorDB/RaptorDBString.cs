@@ -104,9 +104,8 @@ namespace RaptorDB
         public RaptorDBbase(string filename)
         {
             Global.DEFAULTNODESIZE = 1000;
-            _rap = new RaptorDB<rdbInt>(filename, 4, true, INDEXTYPE.BTREE, false);
+            _rap = new RaptorDB<rdbInt>(filename, 4, true, INDEXTYPE.BTREE);
             _rap.InMemoryIndex = true;
-            _rap.StartIndexerThread();
         }
 
 

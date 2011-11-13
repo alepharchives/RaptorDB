@@ -5,7 +5,7 @@ using System.IO;
 
 namespace RaptorDB
 {
-    internal class BTree<T> : IIndex<T> where T : IComparable<T> , IGetBytes<T>
+    internal class BTree<T> : IIndex<T> where T : IRDBDataType<T>
     {
         private Node<T> _root = null;
         private IndexFile<T> _IndexFile = null;
