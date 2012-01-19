@@ -92,4 +92,15 @@ v1.8
 - Implemented IDisposable for clean shutdown
 - optimized bitmap index read speed
 - added minilogger for log progress files
-- 
+- bug fix WAHBitArray
+- Shutdown can flush memory logs t index on flag
+- added SaveMemoryIndexOnShutdown to Global
+
+
+v2.0
+----
+- complete re-architected internals
+- utilizing MGIndex for indexing
+- remove key supported
+- enumerate index supported
+

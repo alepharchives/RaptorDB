@@ -5,7 +5,7 @@ using System.Text;
 
 namespace RaptorDB
 {
-    public class SafeDictionary<TKey, TValue>
+    internal class SafeDictionary<TKey, TValue>
     {
         private readonly object _Padlock = new object();
         private readonly Dictionary<TKey, TValue> _Dictionary = new Dictionary<TKey, TValue>();
@@ -13,11 +13,6 @@ namespace RaptorDB
         public SafeDictionary(int capacity)
         {
             _Dictionary = new Dictionary<TKey, TValue>(capacity);
-        }
-
-        public SafeDictionary(int capacity, IEqualityComparer<TKey> comp)
-        {
-            _Dictionary = new Dictionary<TKey, TValue>(capacity, comp);
         }
 
         public SafeDictionary()
@@ -42,6 +37,11 @@ namespace RaptorDB
             }
         }
 
+        public int Count
+        {
+            get { return _Dictionary.Count; }
+        }
+
         public ICollection<KeyValuePair<TKey, TValue>> GetList()
         {
             return (ICollection<KeyValuePair<TKey, TValue>>)_Dictionary;
@@ -56,18 +56,25 @@ namespace RaptorDB
         {
             lock (_Padlock)
             {
-                if (_Dictionary.ContainsKey(key) == false)
-                    _Dictionary.Add(key, value);
-                else
-                    _Dictionary[key] = value;
+                _Dictionary.Add(key, value);
             }
         }
 
-        public void Remove(TKey key)
+        public TKey[] Keys()
         {
             lock (_Padlock)
             {
-                _Dictionary.Remove(key);
+                TKey[] keys = new TKey[_Dictionary.Keys.Count];
+                _Dictionary.Keys.CopyTo(keys, 0);     
+                return keys;
+            }
+        }
+
+        public bool Remove(TKey key)
+        {
+            lock (_Padlock)
+            {
+                return _Dictionary.Remove(key);
             }
         }
     }
@@ -91,42 +98,19 @@ namespace RaptorDB
 
     //------------------------------------------------------------------------------------------------------------------
 
-    public static class Helper
+    internal static class Helper
     {
         public static MurmurHash2Unsafe MurMur = new MurmurHash2Unsafe();
+        public static int CompareMemCmp(byte[] left, byte[] right)
+        {
+            int c = left.Length;
+            if (c > right.Length)
+                c = right.Length;
+            return memcmp(left, right, c);
+        }
 
-        //[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        //private class MEMORYSTATUSEX
-        //{
-        //    public uint dwLength;
-        //    public uint dwMemoryLoad;
-        //    public ulong ullTotalPhys;
-        //    public ulong ullAvailPhys;
-        //    public ulong ullTotalPageFile;
-        //    public ulong ullAvailPageFile;
-        //    public ulong ullTotalVirtual;
-        //    public ulong ullAvailVirtual;
-        //    public ulong ullAvailExtendedVirtual;
-        //    public MEMORYSTATUSEX()
-        //    {
-        //        this.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
-        //    }
-        //}
-
-        //[return: MarshalAs(UnmanagedType.Bool)]
-        //[DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        //private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
-
-        //internal static int GetFreeMemory()
-        //{
-        //    ulong installedMemory = 0;
-        //    MEMORYSTATUSEX memStatus = new MEMORYSTATUSEX();
-        //    if (GlobalMemoryStatusEx(memStatus))
-        //    {
-        //        installedMemory = memStatus.ullAvailPhys >> 20;
-        //    }
-        //    return (int)installedMemory;
-        //}
+        [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int memcmp(byte[] arr1, byte[] arr2, int cnt);
 
         internal static unsafe int ToInt32(byte[] value, int startIndex, bool reverse)
         {
@@ -213,86 +197,14 @@ namespace RaptorDB
             return buffer;
         }
 
-        internal unsafe static int CompareUnSafe(byte[] left, byte[] right)
-        {
-            int c = left.Length;
-            if (c > right.Length)
-                c = right.Length;
-            fixed (byte* p1 = left, p2 = right)
-            {
-                for (int i = 0; i < c; i++)
-                {
-                    int a = p1[i];
-                    int b = p2[i];
-                    if (a != b)
-                    {
-                        return a - b;
-                    }
-                }
-            }
-            return left.Length - right.Length;
-        }
-
-        public static int CompareSafe(byte[] left, byte[] right)
-        {
-            int c = left.Length;
-            if (c > right.Length)
-                c = right.Length;
-            for (int i = 0; i < c; i++)
-            {
-                int a = left[i];
-                int b = right[i];
-                if (a != b)
-                {
-                    return a - b;
-                }
-            }
-            return left.Length - right.Length;
-        }
-
-        public static int CompareMemCmp(byte[] left, byte[] right)
-        {
-            int c = left.Length;
-            if (c > right.Length)
-                c = right.Length;
-            return memcmp(left, right, c);
-        }
-
-        [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int memcmp(byte[] arr1, byte[] arr2, int cnt);
-
         internal static byte[] GetBytes(string s)
         {
             return Encoding.UTF8.GetBytes(s);
-
-            //byte[] b = new byte[s.Length];
-            //char[] cc = s.ToCharArray();
-            //int l = cc.Length;
-            //for (int i = 0; i < l; i++)//foreach (char c in s)
-            //    b[i] = (byte)cc[i];// c;
-            //return b;
-        }
-
-        internal static string GetString(byte[] bytes)
-        {
-            return Encoding.UTF8.GetString(bytes);
-            //char[] cc = new char[bytes.Length];
-            //int i=0;
-            //foreach (byte b in bytes)
-            //    cc[i++] = (char)b;
-
-            //return new string(cc);
         }
 
         internal static string GetString(byte[] buffer, int index, short keylength)
         {
             return Encoding.UTF8.GetString(buffer, index, keylength);
-            //char[] cc = new char[keylength];
-
-            //for (int i = 0; i < keylength; i++)
-            //    cc[i] = (char)buffer[index + i];
-
-            //return new string(cc);
         }
     }
 }

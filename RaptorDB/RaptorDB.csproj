@@ -97,18 +97,14 @@
     </Compile>
     <Compile Include="DataTypes\DataTypes.cs" />
     <Compile Include="Global.cs" />
-    <Compile Include="IIndex.cs" />
     <Compile Include="Indexes\BitmapIndex.cs" />
-    <Compile Include="Indexes\BTree.cs" />
     <Compile Include="Indexes\IndexFile.cs" />
+    <Compile Include="Indexes\MGIndex.cs" />
     <Compile Include="Indexes\MurMurHash2.cs" />
-    <Compile Include="Indexes\Node.cs" />
     <Compile Include="Indexes\WAHBitarray2.cs" />
     <Compile Include="mylogger.cs" />
     <Compile Include="RaptorDB.cs" />
-    <Compile Include="RaptorDBString.cs" />
     <Compile Include="SafeDictionary.cs" />
-    <Compile Include="Storage\LogFile.cs" />
     <Compile Include="Storage\StorageFile.cs" />
   </ItemGroup>
   <ItemGroup>

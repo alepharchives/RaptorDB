@@ -119,8 +119,7 @@ namespace RaptorDB
 
         //public void OptimizeIndex()
         //{
-        // FIX : optimize index here
-
+        //// FEATURE : optimize index here
         //lock (_lock)
         //{
         //    _internalOP = true;

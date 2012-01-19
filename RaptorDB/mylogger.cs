@@ -7,7 +7,7 @@ using System.IO;
 
 namespace RaptorDB
 {
-    public interface ILog
+    internal interface ILog
     {
         void Debug(object msg, params object[] objs);
         void Error(object msg, params object[] objs);
@@ -23,15 +23,6 @@ namespace RaptorDB
         {
         }
 
-        private void StartWorkerThread()
-        {
-            _worker = new Thread(new ThreadStart(Writer));
-            _worker.IsBackground = true;
-            _worker.Start();
-        }
-
-        private Thread _worker;
-        private bool _working = true;
         private Queue _que = new Queue();
         private StreamWriter _output;
         private string _filename;
@@ -40,6 +31,7 @@ namespace RaptorDB
         private DateTime _lastFileDate;
         private bool _showMethodName = false;
         private string _FilePath = "";
+        System.Timers.Timer _saveTimer;
 
         public bool ShowMethodNames
         {
@@ -64,99 +56,97 @@ namespace RaptorDB
             FileInfo fi = new FileInfo(filename);
             _lastSize = fi.Length;
             _lastFileDate = fi.LastWriteTime;
-            StartWorkerThread();
-            _working = true;
+
+            _saveTimer = new System.Timers.Timer(500);
+            _saveTimer.Elapsed += new System.Timers.ElapsedEventHandler(_saveTimer_Elapsed);
+            _saveTimer.Enabled = true;
+            _saveTimer.AutoReset = true;
+        }
+
+        void _saveTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        {
+            WriteData();
         }
 
         public void ShutDown()
         {
-            _working = false;
-            Thread.Sleep(500);
+            WriteData();
             if (_output != null)
             {
                 _output.Flush();
                 _output.Close();
                 _output = null;
             }
-            _worker = null;
         }
 
-        private void Writer()
-        {
-            while (_working)
-            {
-                WriteData();
-                if (_working)
-                    Thread.Sleep(500);
-            }
-            WriteData();
-            _output.Flush();
-            _output.Close();
-            _output = null;
-        }
-
+        object _writelock = new object();
         private void WriteData()
         {
-            while (_que.Count > 0)
+            if (_output == null)
+                return;
+            lock (_writelock)
             {
-                object o = _que.Dequeue();
-                if (_output != null && o != null)
+                while (_que.Count > 0)
                 {
-                    if (_sizeLimit > 0)
+                    object o = _que.Dequeue();
+                    if (_output != null && o != null)
                     {
-                        // implement size limited logs
-                        // implement rolling logs
-                        #region [  rolling size limit ]
-                        _lastSize += ("" + o).Length;
-                        if (_lastSize > _sizeLimit * 1000)
+                        if (_sizeLimit > 0)
                         {
+                            // implement size limited logs
+                            // implement rolling logs
+                            #region [  rolling size limit ]
+                            _lastSize += ("" + o).Length;
+                            if (_lastSize > _sizeLimit * 1000)
+                            {
+                                _output.Flush();
+                                _output.Close();
+                                int count = 1;
+                                while (File.Exists(_FilePath + Path.GetFileNameWithoutExtension(_filename) + "." + count.ToString("0000")))
+                                    count++;
+
+                                File.Move(_filename,
+                                    _FilePath +
+                                    Path.GetFileNameWithoutExtension(_filename) +
+                                    "." + count.ToString("0000"));
+                                _output = new StreamWriter(_filename, true);
+                                _lastSize = 0;
+                            }
+                            #endregion
+                        }
+                        if (DateTime.Now.Subtract(_lastFileDate).Days > 0)
+                        {
+                            // implement date logs
+                            #region [  rolling dates  ]
                             _output.Flush();
                             _output.Close();
                             int count = 1;
                             while (File.Exists(_FilePath + Path.GetFileNameWithoutExtension(_filename) + "." + count.ToString("0000")))
+                            {
+                                File.Move(_FilePath + Path.GetFileNameWithoutExtension(_filename) + "." + count.ToString("0000"),
+                                   _FilePath +
+                                   Path.GetFileNameWithoutExtension(_filename) +
+                                   "." + count.ToString("0000") +
+                                   "." + _lastFileDate.ToString("yyyy-MM-dd"));
                                 count++;
-
+                            }
                             File.Move(_filename,
-                                _FilePath +
-                                Path.GetFileNameWithoutExtension(_filename) +
-                                "." + count.ToString("0000"));
-                            _output = new StreamWriter(_filename, true);
-                            _lastSize = 0;
-                        }
-                        #endregion
-                    }
-                    if (DateTime.Now.Subtract(_lastFileDate).Days > 0)
-                    {
-                        // implement date logs
-                        #region [  rolling dates  ]
-                        _output.Flush();
-                        _output.Close();
-                        int count = 1;
-                        while (File.Exists(_FilePath + Path.GetFileNameWithoutExtension(_filename) + "." + count.ToString("0000")))
-                        {
-                            File.Move(_FilePath + Path.GetFileNameWithoutExtension(_filename) + "." + count.ToString("0000"),
                                _FilePath +
                                Path.GetFileNameWithoutExtension(_filename) +
                                "." + count.ToString("0000") +
                                "." + _lastFileDate.ToString("yyyy-MM-dd"));
-                            count++;
-                        }
-                        File.Move(_filename,
-                           _FilePath +
-                           Path.GetFileNameWithoutExtension(_filename) +
-                           "." + count.ToString("0000") +
-                           "." + _lastFileDate.ToString("yyyy-MM-dd"));
 
-                        _output = new StreamWriter(_filename, true);
-                        _lastFileDate = DateTime.Now;
-                        _lastSize = 0;
-                        #endregion
+                            _output = new StreamWriter(_filename, true);
+                            _lastFileDate = DateTime.Now;
+                            _lastSize = 0;
+                            #endregion
+                        }
+                        _output.Write(o);
                     }
-                    _output.Write(o);
                 }
+                if (_output != null)
+                    _output.Flush();
             }
-            if (_output != null)
-                _output.Flush();
         }
 
         private string FormatLog(string log, string type, string meth, string msg, object[] objs)
@@ -233,7 +223,7 @@ namespace RaptorDB
         #endregion
     }
 
-    public static class LogManager
+    internal static class LogManager
     {
         public static ILog GetLogger(Type obj)
         {

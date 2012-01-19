@@ -5,203 +5,120 @@ using System.Text;
 
 namespace RaptorDB
 {
-    public interface IRDBDataType<T> : IComparable<T>, IGetBytes<T>, IEqualityComparer<T>, IEquatable<T> 
+    internal interface IGetBytes<T>
     {
-    }
-    
-    //------------------------------------------------------------------------------------------------------------------
-
-    public interface IGetBytes<T>
-    {
-        byte[] GetBytes();
+        byte[] GetBytes(T obj);
         T GetObject(byte[] buffer, int offset, int count);
     }
 
-    //----------------------------------------------------------------------------------------------------
-
-    public class rdbByteArray : IRDBDataType<rdbByteArray>
+    internal class RDBDataType<T>
     {
-        public rdbByteArray()
+        public static IGetBytes<T> ByteHandler()
         {
+            Type type = typeof(T);
 
+            if (type == typeof(int))
+                return (IGetBytes<T>)new inthandler<T>();
+
+            else if (type == typeof(uint))
+                return (IGetBytes<T>)new uinthandler<T>();
+
+            else if (type == typeof(long))
+                return (IGetBytes<T>)new longhandler<T>();
+
+            else if (type == typeof(Guid))
+                return (IGetBytes<T>)new guidhandler<T>();
+
+            else if (type == typeof(string))
+                return (IGetBytes<T>)new stringhandler<T>();
+
+            return null;
         }
 
-        public rdbByteArray(byte[] key)
+        public static byte GetByteSize(byte keysize)
         {
-            val = key;
-        }
-        public byte[] val;
+            byte size = 4;
+            Type t = typeof(T);
 
-        public int CompareTo(rdbByteArray obj)
-        {
-            return Helper.CompareUnSafe(val, obj.val);
-        }
+            if (t == typeof(int))
+                size = 4;
+            if (t == typeof(uint))
+                size = 4;
+            if (t == typeof(long))
+                size = 8;
+            if (t == typeof(Guid))
+                size = 16;
+            if (t == typeof(string))
+                size = keysize;
 
-        public byte[] GetBytes()
-        {
-            return val;
-        }
-
-        public bool Equals(rdbByteArray a, rdbByteArray b)
-        {
-            if (a == null || b == null)
-                return a == b;
-            if (a.val.Length != b.val.Length)
-                return false;
-            int i = Helper.CompareUnSafe(a.val, b.val);
-            return i==0?true:false;
-        }
-
-        public int GetHashCode(rdbByteArray obj)
-        {
-            if (obj == null)
-                throw new ArgumentNullException();
-            int iHash = 0;
-            for (int i = 0; i < obj.val.Length; ++i)
-                iHash ^= (obj.val[i] << ((0x03 & i) << 3));
-            return iHash;
-        }
-
-        public bool Equals(rdbByteArray other)
-        {
-            if (other == null)
-                return false;
-            if (this.val.Length != other.val.Length)
-                return false;
-            int i = Helper.CompareUnSafe(this.val, other.val);
-            return i == 0 ? true : false;
-        }
-
-        public rdbByteArray GetObject(byte[] buffer, int offset, int count)
-        {
-            byte[] b = new byte[count];
-            Buffer.BlockCopy(buffer, offset, b, 0, count);
-            return new rdbByteArray(b);
-        }
-
-        public override bool Equals(object obj)
-        {
-            int i = Helper.CompareUnSafe(this.val, ((rdbByteArray)obj).val);
-            return i == 0 ? true : false;
-        }
-
-        public override int GetHashCode()
-        {
-            return this.GetHashCode(this);
+            return size;
         }
     }
 
-    //----------------------------------------------------------------------------------------------------
-
-    public class rdbInt : IRDBDataType<rdbInt>
+    internal class stringhandler<T> : IGetBytes<string>
     {
-        public rdbInt()
+        public byte[] GetBytes(string obj)
         {
-
-        }
-        public rdbInt(int i)
-        {
-            _i = i;
-        }
-        public rdbInt(uint i)
-        {
-            _i = (int)i;
-        }
-        private int _i;
-
-        public int CompareTo(rdbInt other)
-        {
-            return _i.CompareTo(other._i);
+            return Helper.GetBytes(obj);
         }
 
-        public byte[] GetBytes()
+        public string GetObject(byte[] buffer, int offset, int count)
         {
-            return Helper.GetBytes(_i, false);
-        }
-
-        public bool Equals(rdbInt x, rdbInt y)
-        {
-            return x._i == y._i;
-        }
-
-        public int GetHashCode(rdbInt obj)
-        {
-            return obj._i;
-        }
-
-        public bool Equals(rdbInt other)
-        {
-            return this._i == other._i;
-        }
-
-        public rdbInt GetObject(byte[] buffer, int offset, int count)
-        {
-            return new rdbInt(Helper.ToInt32(buffer, offset));
-        }
-
-        public override bool Equals(object obj)
-        {
-            return this._i == ((rdbInt)obj)._i;
-        }
-
-        public override int GetHashCode()
-        {
-            return _i;
+            return Helper.GetString(buffer, offset, (short)count);
         }
     }
 
-    //----------------------------------------------------------------------------------------------------
-
-    public class rdbLong : IRDBDataType<rdbLong>
+    internal class inthandler<T> : IGetBytes<int>
     {
-        public rdbLong()
+        public byte[] GetBytes(int obj)
         {
-
-        }
-        public rdbLong(long i)
-        {
-            _i = i;
-        }
-        private long _i;
-
-        public int CompareTo(rdbLong other)
-        {
-            return _i.CompareTo(other._i);
+            return Helper.GetBytes(obj, false);
         }
 
-        public byte[] GetBytes()
+        public int GetObject(byte[] buffer, int offset, int count)
         {
-            return Helper.GetBytes(_i, false);
+            return Helper.ToInt32(buffer, offset);
+        }
+    }
+
+    internal class uinthandler<T> : IGetBytes<uint>
+    {
+        public byte[] GetBytes(uint obj)
+        {
+            return Helper.GetBytes(obj, false);
         }
 
-        public bool Equals(rdbLong x, rdbLong y)
+        public uint GetObject(byte[] buffer, int offset, int count)
         {
-            return x._i == y._i;
+            return (uint)Helper.ToInt32(buffer, offset);
+        }
+    }
+
+    internal class longhandler<T> : IGetBytes<long>
+    {
+        public byte[] GetBytes(long obj)
+        {
+            return Helper.GetBytes(obj, false);
         }
 
-        public int GetHashCode(rdbLong obj)
+        public long GetObject(byte[] buffer, int offset, int count)
         {
-            return obj._i.GetHashCode();
+            return Helper.ToInt64(buffer, offset);
+        }
+    }
+
+    internal class guidhandler<T> : IGetBytes<Guid>
+    {
+        public byte[] GetBytes(Guid obj)
+        {
+            return obj.ToByteArray();
         }
 
-        public bool Equals(rdbLong other)
+        public Guid GetObject(byte[] buffer, int offset, int count)
         {
-            return this._i == other._i;
-        }
-
-        public rdbLong GetObject(byte[] buffer, int offset, int count)
-        {
-            return new rdbLong(Helper.ToInt64(buffer, offset));
-        }
-
-        public override bool Equals(object obj)
-        {
-            return this._i == ((rdbLong)obj)._i;
-        }
-
-        public override int GetHashCode()
-        {
-            return _i.GetHashCode();
+            byte[] b = new byte[16];
+            Buffer.BlockCopy(buffer, offset, b, 0, 16);
+            return new Guid(b);
         }
     }
 }
