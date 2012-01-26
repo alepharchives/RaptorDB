@@ -53,6 +53,16 @@ namespace RaptorDB
 
             return size;
         }
+
+        internal static object GetEmpty()
+        {
+            Type t = typeof(T);
+
+            if (t == typeof(string))
+                return "";
+
+            return default(T);
+        }
     }
 
     internal class stringhandler<T> : IGetBytes<string>

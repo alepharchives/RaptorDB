@@ -12,6 +12,16 @@ namespace testing
 {
     public class bplusTest
     {
+        public static void StringKeyTest()
+        {
+            var db = RaptorDB<string>.Open("c:\\raptordbtest\\strings", 255, true);
+            for (int i = 0; i < 100000; i++)
+            {
+                db.Set("asdfasd" + i, "" + i);
+            }
+            db.Shutdown();
+        }
+
         private static void test()
         {        
             int count = 10*1000000;

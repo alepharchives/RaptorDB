@@ -104,3 +104,9 @@ v2.0
 - remove key supported
 - enumerate index supported
 
+v2.1
+----
+- lock on safedictionary iterator set
+- string default(T) -> "" instead of null
+- mgindex string firstkey null fix 
+- added test for normal string keys

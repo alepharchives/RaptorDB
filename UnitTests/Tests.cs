@@ -285,6 +285,17 @@ namespace UnitTests
         }
 
         [Test]
+        public static void StringKeyTest()
+        {
+            var db = RaptorDB<string>.Open("c:\\raptordbtest\\strings", 255, true);
+            for (int i = 0; i < 100000; i++)
+            {
+                db.Set("asdfasd" + i, ""+i);
+            }
+            db.Shutdown();
+        }
+
+        [Test]
         public static void RaptorDBString_test()
         {
             Console.WriteLine("unlimited key size test");

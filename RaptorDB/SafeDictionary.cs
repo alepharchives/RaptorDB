@@ -33,7 +33,8 @@ namespace RaptorDB
             }
             set
             {
-                _Dictionary[key] = value;
+                lock (_Padlock)
+                    _Dictionary[key] = value;
             }
         }
 
@@ -55,9 +56,7 @@ namespace RaptorDB
         public void Add(TKey key, TValue value)
         {
             lock (_Padlock)
-            {
                 _Dictionary.Add(key, value);
-            }
         }
 
         public TKey[] Keys()
@@ -65,7 +64,7 @@ namespace RaptorDB
             lock (_Padlock)
             {
                 TKey[] keys = new TKey[_Dictionary.Keys.Count];
-                _Dictionary.Keys.CopyTo(keys, 0);     
+                _Dictionary.Keys.CopyTo(keys, 0);
                 return keys;
             }
         }
@@ -73,9 +72,7 @@ namespace RaptorDB
         public bool Remove(TKey key)
         {
             lock (_Padlock)
-            {
                 return _Dictionary.Remove(key);
-            }
         }
     }
 

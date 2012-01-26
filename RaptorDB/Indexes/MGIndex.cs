@@ -77,6 +77,7 @@ namespace RaptorDB
             if (_pageList.Count == 0)
             {
                 Page<T> page = new Page<T>();
+                page.FirstKey = (T)RDBDataType<T>.GetEmpty();
                 page.DiskPageNumber = _index.GetNewPageNumber();
                 _pageList.Add(page.FirstKey, new PageInfo(page.DiskPageNumber, 0, 0));
                 _cache.Add(page.DiskPageNumber, page);
