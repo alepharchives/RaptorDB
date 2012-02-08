@@ -110,3 +110,8 @@ v2.1
 - string default(T) -> "" instead of null
 - mgindex string firstkey null fix 
 - added test for normal string keys
+
+v2.2
+----
+- bug fix removekey
+- removed un-needed initialization in safedictionary

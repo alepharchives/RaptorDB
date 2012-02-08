@@ -133,7 +133,7 @@ namespace RaptorDB
 
             // seek end of file
             long offset = _lastWriteOffset;
-            byte[] hdr = CreateRowHeader(kl, data.Length);
+            byte[] hdr = CreateRowHeader(kl, (data==null?0:data.Length));
             if (deleted)
                 hdr[(int)HDR_POS.Flags] = (byte)1;
             // write header info

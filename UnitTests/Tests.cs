@@ -49,6 +49,7 @@ namespace UnitTests
                 found++;
             }
             Console.WriteLine("Enumerate from key count = " + found);
+            db.RemoveKey(sk);
             db.Shutdown();
         }
 
