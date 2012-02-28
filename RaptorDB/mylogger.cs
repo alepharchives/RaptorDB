@@ -240,5 +240,4 @@ namespace RaptorDB
             FileLogger.Instance.ShutDown();
         }
     }
-
 }

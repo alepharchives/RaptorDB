@@ -8,7 +8,7 @@ namespace RaptorDB
     internal class SafeDictionary<TKey, TValue>
     {
         private readonly object _Padlock = new object();
-        private readonly Dictionary<TKey, TValue> _Dictionary =null;//= new Dictionary<TKey, TValue>();
+        private readonly Dictionary<TKey, TValue> _Dictionary = null;
 
         public SafeDictionary(int capacity)
         {

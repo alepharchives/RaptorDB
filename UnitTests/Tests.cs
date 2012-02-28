@@ -106,7 +106,7 @@ namespace UnitTests
         [Test]
         public static void One_Million_Set_Shutdown_Get()
         {
-            Set_Get("1million", 1000000, true, false);
+            Set_Get("1m_with_shutdown", 1000000, true, false);
         }
 
         [Test]
@@ -291,7 +291,7 @@ namespace UnitTests
             var db = RaptorDB<string>.Open("c:\\raptordbtest\\strings", 255, true);
             for (int i = 0; i < 100000; i++)
             {
-                db.Set("asdfasd" + i, ""+i);
+                db.Set("asdfasd" + i, "" + i);
             }
             db.Shutdown();
         }

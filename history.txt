@@ -115,3 +115,8 @@ v2.2
 ----
 - bug fix removekey
 - removed un-needed initialization in safedictionary
+
+v2.3
+-----
+- changed internal classes to structs (2x+ speed, 30% less memory)
+- added keystore class and code refactoring

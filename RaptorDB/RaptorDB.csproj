@@ -24,7 +24,8 @@
     <OldToolsVersion>0.0</OldToolsVersion>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
-    <TargetFrameworkProfile>Client</TargetFrameworkProfile>
+    <TargetFrameworkProfile>
+    </TargetFrameworkProfile>
     <PublishUrl>publish\</PublishUrl>
     <Install>true</Install>
     <InstallFrom>Disk</InstallFrom>
@@ -102,6 +103,7 @@
     <Compile Include="Indexes\MGIndex.cs" />
     <Compile Include="Indexes\MurMurHash2.cs" />
     <Compile Include="Indexes\WAHBitarray2.cs" />
+    <Compile Include="KeyStore.cs" />
     <Compile Include="mylogger.cs" />
     <Compile Include="RaptorDB.cs" />
     <Compile Include="SafeDictionary.cs" />

@@ -294,7 +294,7 @@ namespace RaptorDB
             if (b[0] == _BlockHeader[0] && b[1] == _BlockHeader[1] && b[2] == _BlockHeader[2] && b[3] == _BlockHeader[3])
             {
                 // create node here
-                Page<T> page = new Page<T>();
+                Page<T> page = new Page<T>(false);
 
                 short count = Helper.ToInt16(b, 5);
                 if (count > _PageNodeCount)

@@ -7,7 +7,7 @@ using System.Threading;
 namespace RaptorDB
 {
     #region [ internal classes ]
-    internal class PageInfo
+    internal struct PageInfo
     {
         public PageInfo(int pagenum, int uniquecount, int duplicatecount)
         {
@@ -18,11 +18,12 @@ namespace RaptorDB
         public int UniqueCount;
     }
 
-    internal class KeyInfo
+    internal struct KeyInfo
     {
         public KeyInfo(int recnum)
         {
             RecordNumber = recnum;
+            DuplicateBitmapNumber = -1;
         }
         public KeyInfo(int recnum, int bitmaprec)
         {
@@ -30,16 +31,24 @@ namespace RaptorDB
             DuplicateBitmapNumber = bitmaprec;
         }
         public int RecordNumber;
-        public int DuplicateBitmapNumber = -1;
+        public int DuplicateBitmapNumber;
     }
 
-    internal class Page<T>
+    internal struct Page<T>
     {
-        public int DiskPageNumber = -1;
-        public int RightPageNumber = -1;
+        public Page(bool b) // kludge so the compiler doesn't complain
+        {
+            DiskPageNumber = -1;
+            RightPageNumber = -1;
+            tree = new SafeDictionary<T, KeyInfo>(Global.PageItemCount);
+            isDirty = false;
+            FirstKey = default(T);
+        }
+        public int DiskPageNumber;
+        public int RightPageNumber;
         public T FirstKey;
-        public bool isDirty = false;
-        public SafeDictionary<T, KeyInfo> tree = new SafeDictionary<T, KeyInfo>(Global.PageItemCount);
+        public bool isDirty;
+        public SafeDictionary<T, KeyInfo> tree;
     }
 
 
@@ -76,9 +85,10 @@ namespace RaptorDB
             _index.GetPageList(_pageListDiskPages, _pageList, out _LastIndexedRecordNumber);
             if (_pageList.Count == 0)
             {
-                Page<T> page = new Page<T>();
+                Page<T> page = new Page<T>(false);
                 page.FirstKey = (T)RDBDataType<T>.GetEmpty();
                 page.DiskPageNumber = _index.GetNewPageNumber();
+                page.isDirty = true;
                 _pageList.Add(page.FirstKey, new PageInfo(page.DiskPageNumber, 0, 0));
                 _cache.Add(page.DiskPageNumber, page);
             }
@@ -106,16 +116,17 @@ namespace RaptorDB
 
         public void Set(T key, int val)
         {
-            PageInfo pi = null;
+            PageInfo pi;
             Page<T> page = LoadPage(key, out pi);
 
-            KeyInfo ki = null;
+            KeyInfo ki;
             if (page.tree.TryGetValue(key, out ki))
             {
                 // item exists
                 if (_AllowDuplicates)
-                    SaveDuplicate(key, ki);
+                    SaveDuplicate(key, ref ki);
                 ki.RecordNumber = val;
+                page.tree[key] = ki; // structs need resetting
             }
             else
             {
@@ -135,9 +146,9 @@ namespace RaptorDB
         public bool Get(T key, out int val)
         {
             val = -1;
-            PageInfo pi = null;
+            PageInfo pi;
             Page<T> page = LoadPage(key, out pi);
-            KeyInfo ki = null;
+            KeyInfo ki;
             bool ret = page.tree.TryGetValue(key, out ki);
             if (ret)
                 val = ki.RecordNumber;
@@ -176,7 +187,7 @@ namespace RaptorDB
         {
             List<KeyValuePair<T, int>> list = new List<KeyValuePair<T, int>>();
             // enumerate
-            PageInfo pi = null;
+            PageInfo pi;
             Page<T> page = LoadPage(fromkey, out pi);
             T[] keys = page.tree.Keys();
             Array.Sort<T>(keys);
@@ -200,9 +211,9 @@ namespace RaptorDB
 
         public IEnumerable<int> GetDuplicates(T key)
         {
-            PageInfo pi = null;
+            PageInfo pi;
             Page<T> page = LoadPage(key, out pi);
-            KeyInfo ki = null;
+            KeyInfo ki;
             bool ret = page.tree.TryGetValue(key, out ki);
             if (ret)
                 // get duplicates
@@ -219,7 +230,7 @@ namespace RaptorDB
 
         public bool RemoveKey(T key)
         {
-            PageInfo pi = null;
+            PageInfo pi;
             Page<T> page = LoadPage(key, out pi);
             bool b = page.tree.Remove(key);
             if (b)
@@ -247,7 +258,7 @@ namespace RaptorDB
             // split the page
             DateTime dt = FastDateTime.Now;
 
-            Page<T> newpage = new Page<T>();
+            Page<T> newpage = new Page<T>(false);
             newpage.DiskPageNumber = _index.GetNewPageNumber();
             newpage.RightPageNumber = page.RightPageNumber;
             newpage.isDirty = true;
@@ -289,7 +300,7 @@ namespace RaptorDB
             pageinfo = _pageList.Values[pos];
             pagenum = pageinfo.PageNumber;
 
-            Page<T> page = null;
+            Page<T> page;
             if (_cache.TryGetValue(pagenum, out page) == false)
             {
                 //load page from disk
@@ -301,7 +312,7 @@ namespace RaptorDB
 
         private Page<T> LoadPage(int pagenum)
         {
-            Page<T> page = null;
+            Page<T> page;
             if (_cache.TryGetValue(pagenum, out page) == false)
             {
                 //load page from disk
@@ -311,7 +322,7 @@ namespace RaptorDB
             return page;
         }
 
-        private void SaveDuplicate(T key, KeyInfo ki)
+        private void SaveDuplicate(T key, ref KeyInfo ki)
         {
             if (ki.DuplicateBitmapNumber == -1)
                 ki.DuplicateBitmapNumber = _index.GetBitmapDuplaicateFreeRecordNumber();
